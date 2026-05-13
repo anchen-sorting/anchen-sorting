@@ -1,0 +1,1717 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>安辰分貨系統</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=Noto+Sans+TC:wght@400;500;700;900&display=swap');
+
+  :root {
+    --bg: #0a0e14;
+    --surface: #121820;
+    --surface2: #1a2230;
+    --border: #2a3a4a;
+    --accent: #00d4ff;
+    --accent2: #ff6b35;
+    --success: #00e676;
+    --warning: #ffab00;
+    --danger: #ff3d57;
+    --text: #e8f0f8;
+    --text2: #7a9ab8;
+    --mono: 'IBM Plex Mono', monospace;
+    --sans: 'Noto Sans TC', sans-serif;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* ── HEADER ── */
+  .header {
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 12px 16px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+  }
+  .header-title {
+    font-size: 15px;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    color: var(--accent);
+  }
+  .header-sub {
+    font-size: 11px;
+    color: var(--text2);
+    font-family: var(--mono);
+  }
+  .batch-tag {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 4px 10px;
+    font-size: 11px;
+    font-family: var(--mono);
+    color: var(--warning);
+    cursor: pointer;
+  }
+
+  /* ── TABS ── */
+  .tabs {
+    display: flex;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+  }
+  .tab {
+    flex: 1;
+    padding: 12px;
+    text-align: center;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text2);
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    transition: all 0.2s;
+  }
+  .tab.active {
+    color: var(--accent);
+    border-bottom-color: var(--accent);
+    background: rgba(0,212,255,0.05);
+  }
+
+  /* ── PAGES ── */
+  .page { display: none; padding: 16px; }
+  .page.active { display: block; }
+
+  /* ── SCAN PAGE ── */
+  .scan-status {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 16px;
+    margin-bottom: 16px;
+  }
+  .scan-step {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 0;
+  }
+  .scan-step + .scan-step {
+    border-top: 1px solid var(--border);
+  }
+  .step-dot {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    font-weight: 700;
+    font-family: var(--mono);
+    flex-shrink: 0;
+  }
+  .step-dot.waiting { background: var(--surface2); color: var(--text2); border: 1px solid var(--border); }
+  .step-dot.active { background: rgba(0,212,255,0.2); color: var(--accent); border: 1px solid var(--accent); animation: pulse 1.5s infinite; }
+  .step-dot.done { background: rgba(0,230,118,0.2); color: var(--success); border: 1px solid var(--success); }
+  @keyframes pulse { 0%,100% { box-shadow: 0 0 0 0 rgba(0,212,255,0.4); } 50% { box-shadow: 0 0 0 6px rgba(0,212,255,0); } }
+
+  .step-info { flex: 1; }
+  .step-label { font-size: 12px; color: var(--text2); }
+  .step-value {
+    font-size: 14px;
+    font-weight: 600;
+    font-family: var(--mono);
+    color: var(--text);
+    margin-top: 2px;
+  }
+  .step-value.filled { color: var(--success); }
+
+  /* Camera view */
+  .camera-wrap {
+    position: relative;
+    background: #000;
+    border-radius: 12px;
+    overflow: hidden;
+    aspect-ratio: 4/3;
+    margin-bottom: 16px;
+  }
+  #cameraFeed {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+  .camera-overlay {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .scan-frame {
+    width: 70%;
+    aspect-ratio: 1;
+    border: 2px solid var(--accent);
+    border-radius: 8px;
+    position: relative;
+    box-shadow: 0 0 0 9999px rgba(0,0,0,0.4);
+  }
+  .scan-frame::before {
+    content: '';
+    position: absolute;
+    top: -1px; left: -1px; right: -1px;
+    height: 3px;
+    background: var(--accent);
+    animation: scanline 2s linear infinite;
+    box-shadow: 0 0 10px var(--accent);
+  }
+  @keyframes scanline { 0% { top: 0; } 100% { top: 100%; } }
+  .scan-frame-corner {
+    position: absolute;
+    width: 16px; height: 16px;
+    border-color: var(--accent);
+    border-style: solid;
+  }
+  .scan-frame-corner.tl { top: -2px; left: -2px; border-width: 3px 0 0 3px; }
+  .scan-frame-corner.tr { top: -2px; right: -2px; border-width: 3px 3px 0 0; }
+  .scan-frame-corner.bl { bottom: -2px; left: -2px; border-width: 0 0 3px 3px; }
+  .scan-frame-corner.br { bottom: -2px; right: -2px; border-width: 0 3px 3px 0; }
+
+  .camera-hint {
+    position: absolute;
+    bottom: 12px;
+    left: 0; right: 0;
+    text-align: center;
+    font-size: 12px;
+    color: rgba(255,255,255,0.7);
+    background: rgba(0,0,0,0.5);
+    padding: 4px;
+  }
+
+  /* Camera placeholder */
+  .camera-placeholder {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    background: var(--surface2);
+  }
+  .camera-icon {
+    font-size: 48px;
+    opacity: 0.5;
+  }
+  .camera-placeholder p {
+    font-size: 13px;
+    color: var(--text2);
+    text-align: center;
+    padding: 0 24px;
+  }
+
+  .btn {
+    display: block;
+    width: 100%;
+    padding: 14px;
+    border-radius: 10px;
+    border: none;
+    font-size: 15px;
+    font-weight: 700;
+    font-family: var(--sans);
+    cursor: pointer;
+    transition: all 0.15s;
+    letter-spacing: 0.02em;
+  }
+  .btn:active { transform: scale(0.97); }
+  .btn-primary { background: var(--accent); color: #000; }
+  .btn-secondary { background: var(--surface2); color: var(--text); border: 1px solid var(--border); }
+  .btn-success { background: var(--success); color: #000; }
+  .btn-danger { background: var(--danger); color: #fff; }
+  .btn-sm {
+    display: inline-block;
+    width: auto;
+    padding: 8px 16px;
+    font-size: 13px;
+  }
+
+  /* Manual input */
+  .manual-toggle {
+    text-align: center;
+    margin-bottom: 16px;
+  }
+  .manual-toggle a {
+    font-size: 12px;
+    color: var(--text2);
+    text-decoration: underline;
+    cursor: pointer;
+  }
+  .manual-input-area {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 16px;
+    margin-bottom: 16px;
+    display: none;
+  }
+  .manual-input-area.show { display: block; }
+  .input-group { margin-bottom: 12px; }
+  .input-label { font-size: 11px; color: var(--text2); margin-bottom: 4px; font-family: var(--mono); }
+  .input-field {
+    width: 100%;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 12px;
+    color: var(--text);
+    font-size: 14px;
+    font-family: var(--mono);
+    outline: none;
+  }
+  .input-field:focus { border-color: var(--accent); }
+
+  /* ── RESULT CARD ── */
+  .result-card {
+    background: var(--surface);
+    border-radius: 16px;
+    overflow: hidden;
+    margin-bottom: 16px;
+    border: 1px solid var(--border);
+    display: none;
+  }
+  .result-card.show { display: block; }
+  .result-header {
+    padding: 14px 16px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    border-bottom: 1px solid var(--border);
+  }
+  .result-header.ok { background: rgba(0,230,118,0.1); }
+  .result-header.warn { background: rgba(255,171,0,0.1); }
+  .result-header.error { background: rgba(255,61,87,0.1); }
+  .result-icon { font-size: 22px; }
+  .result-status { font-size: 13px; font-weight: 700; }
+  .result-header.ok .result-status { color: var(--success); }
+  .result-header.warn .result-status { color: var(--warning); }
+  .result-header.error .result-status { color: var(--danger); }
+
+  .result-body { padding: 16px; }
+
+  .hawb-display {
+    text-align: center;
+    padding: 20px 0;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 16px;
+  }
+  .hawb-label { font-size: 11px; color: var(--text2); letter-spacing: 0.1em; margin-bottom: 6px; }
+  .hawb-number {
+    font-size: 32px;
+    font-weight: 900;
+    font-family: var(--mono);
+    color: var(--accent);
+    letter-spacing: 0.05em;
+    line-height: 1;
+  }
+  .mawb-line {
+    font-size: 12px;
+    color: var(--text2);
+    font-family: var(--mono);
+    margin-top: 6px;
+  }
+
+  .info-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    margin-bottom: 16px;
+  }
+  .info-cell {
+    background: var(--surface2);
+    border-radius: 8px;
+    padding: 10px 12px;
+  }
+  .info-cell-label { font-size: 10px; color: var(--text2); margin-bottom: 4px; }
+  .info-cell-value { font-size: 14px; font-weight: 600; font-family: var(--mono); color: var(--text); }
+
+  .qty-section {
+    background: var(--surface2);
+    border-radius: 10px;
+    padding: 14px;
+    margin-bottom: 14px;
+  }
+  .qty-title { font-size: 11px; color: var(--text2); margin-bottom: 10px; }
+  .qty-bar-wrap {
+    background: var(--bg);
+    border-radius: 4px;
+    height: 8px;
+    overflow: hidden;
+    margin-bottom: 8px;
+  }
+  .qty-bar {
+    height: 100%;
+    border-radius: 4px;
+    background: var(--accent);
+    transition: width 0.5s ease;
+  }
+  .qty-bar.full { background: var(--success); }
+  .qty-numbers {
+    display: flex;
+    justify-content: space-between;
+    font-size: 12px;
+    font-family: var(--mono);
+  }
+  .qty-current { color: var(--accent); font-weight: 700; }
+  .qty-total { color: var(--text2); }
+
+  .qty-input-row {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+  }
+  .qty-input {
+    flex: 1;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px;
+    color: var(--text);
+    font-size: 20px;
+    font-family: var(--mono);
+    font-weight: 700;
+    text-align: center;
+    outline: none;
+    width: 80px;
+  }
+  .qty-input:focus { border-color: var(--accent); }
+  .qty-btn {
+    width: 44px;
+    height: 44px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--surface2);
+    color: var(--text);
+    font-size: 22px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  /* Multiple results */
+  .multi-results { margin-bottom: 16px; }
+  .multi-label { font-size: 12px; color: var(--warning); margin-bottom: 10px; }
+  .result-option {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 12px 14px;
+    margin-bottom: 8px;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .result-option:active { border-color: var(--accent); background: rgba(0,212,255,0.1); }
+  .result-option-hawb {
+    font-size: 18px;
+    font-weight: 700;
+    font-family: var(--mono);
+    color: var(--accent);
+  }
+  .result-option-mawb { font-size: 11px; color: var(--text2); font-family: var(--mono); margin-top: 3px; }
+  .result-option-detail { font-size: 12px; color: var(--text2); margin-top: 6px; }
+
+  /* ── COMPLETE OVERLAY ── */
+  .complete-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 200;
+    background: rgba(0,0,0,0.85);
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    gap: 20px;
+  }
+  .complete-overlay.show { display: flex; }
+  .complete-icon { font-size: 80px; animation: bounceIn 0.5s ease; }
+  @keyframes bounceIn {
+    0% { transform: scale(0); opacity: 0; }
+    70% { transform: scale(1.1); }
+    100% { transform: scale(1); opacity: 1; }
+  }
+  .complete-hawb {
+    font-size: 36px;
+    font-weight: 900;
+    font-family: var(--mono);
+    color: var(--success);
+    text-align: center;
+  }
+  .complete-msg { font-size: 16px; color: var(--text2); }
+
+  /* ── UPLOAD PAGE ── */
+  .upload-zone {
+    border: 2px dashed var(--border);
+    border-radius: 16px;
+    padding: 40px 20px;
+    text-align: center;
+    margin-bottom: 20px;
+    cursor: pointer;
+    transition: all 0.2s;
+    background: var(--surface);
+  }
+  .upload-zone:active { border-color: var(--accent); background: rgba(0,212,255,0.05); }
+  .upload-icon { font-size: 40px; margin-bottom: 12px; }
+  .upload-title { font-size: 15px; font-weight: 700; margin-bottom: 6px; }
+  .upload-sub { font-size: 12px; color: var(--text2); }
+  #fileInput { display: none; }
+
+  /* Preview table */
+  .preview-section { display: none; }
+  .preview-section.show { display: block; }
+  .section-title {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--text2);
+    letter-spacing: 0.08em;
+    margin-bottom: 12px;
+    text-transform: uppercase;
+  }
+  .preview-scroll { overflow-x: auto; margin-bottom: 16px; }
+  .preview-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+    font-family: var(--mono);
+    min-width: 500px;
+  }
+  .preview-table th {
+    background: var(--surface2);
+    padding: 8px 10px;
+    text-align: left;
+    color: var(--text2);
+    font-weight: 600;
+    border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+  }
+  .preview-table td {
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--border);
+    color: var(--text);
+    white-space: nowrap;
+  }
+  .preview-table tr:last-child td { border-bottom: none; }
+  .preview-table .editable {
+    background: rgba(0,212,255,0.05);
+    border: 1px solid rgba(0,212,255,0.2);
+    border-radius: 4px;
+    padding: 4px 6px;
+    color: var(--text);
+    font-family: var(--mono);
+    font-size: 12px;
+    width: 100%;
+    outline: none;
+    min-width: 80px;
+  }
+  .preview-table .editable:focus { border-color: var(--accent); }
+  .tag { display: inline-block; padding: 2px 6px; border-radius: 4px; font-size: 10px; font-weight: 700; }
+  .tag-warn { background: rgba(255,171,0,0.2); color: var(--warning); }
+  .tag-ok { background: rgba(0,230,118,0.2); color: var(--success); }
+
+  /* ── PROGRESS PAGE ── */
+  .progress-filter {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 16px;
+    overflow-x: auto;
+    padding-bottom: 4px;
+  }
+  .filter-chip {
+    padding: 6px 14px;
+    border-radius: 20px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text2);
+    transition: all 0.15s;
+  }
+  .filter-chip.active { background: var(--accent); color: #000; border-color: var(--accent); }
+
+  .progress-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 14px;
+    margin-bottom: 10px;
+  }
+  .progress-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 10px;
+  }
+  .progress-hawb {
+    font-size: 16px;
+    font-weight: 700;
+    font-family: var(--mono);
+    color: var(--accent);
+  }
+  .progress-mawb { font-size: 11px; color: var(--text2); font-family: var(--mono); }
+  .progress-badge {
+    padding: 3px 8px;
+    border-radius: 6px;
+    font-size: 11px;
+    font-weight: 700;
+  }
+  .badge-complete { background: rgba(0,230,118,0.2); color: var(--success); }
+  .badge-partial { background: rgba(255,171,0,0.2); color: var(--warning); }
+  .badge-pending { background: rgba(122,154,184,0.2); color: var(--text2); }
+
+  .progress-items { display: flex; flex-direction: column; gap: 6px; }
+  .progress-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+  }
+  .progress-item-code { font-family: var(--mono); color: var(--text); flex: 1; }
+  .progress-item-qty { font-family: var(--mono); color: var(--text2); white-space: nowrap; }
+  .mini-bar-wrap { width: 60px; background: var(--surface2); border-radius: 3px; height: 6px; }
+  .mini-bar { height: 100%; border-radius: 3px; background: var(--warning); transition: width 0.3s; }
+  .mini-bar.full { background: var(--success); }
+
+  /* Batch selector modal */
+  .modal-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 150;
+    background: rgba(0,0,0,0.8);
+    align-items: flex-end;
+    justify-content: center;
+  }
+  .modal-overlay.show { display: flex; }
+  .modal-sheet {
+    background: var(--surface);
+    border-radius: 20px 20px 0 0;
+    padding: 20px;
+    width: 100%;
+    max-height: 60vh;
+    overflow-y: auto;
+  }
+  .modal-title { font-size: 16px; font-weight: 700; margin-bottom: 16px; }
+  .batch-option {
+    padding: 14px;
+    border-radius: 10px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    margin-bottom: 8px;
+    cursor: pointer;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    transition: all 0.15s;
+  }
+  .batch-option:active { border-color: var(--accent); }
+  .batch-option.selected { border-color: var(--accent); background: rgba(0,212,255,0.1); }
+  .batch-date { font-size: 15px; font-weight: 700; font-family: var(--mono); }
+  .batch-info { font-size: 11px; color: var(--text2); margin-top: 3px; }
+  .batch-count { font-size: 12px; color: var(--text2); font-family: var(--mono); }
+
+  .divider { height: 1px; background: var(--border); margin: 16px 0; }
+
+  /* Toast */
+  .toast {
+    position: fixed;
+    bottom: 80px;
+    left: 50%;
+    transform: translateX(-50%) translateY(20px);
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 10px 20px;
+    font-size: 13px;
+    z-index: 300;
+    opacity: 0;
+    transition: all 0.3s;
+    white-space: nowrap;
+    pointer-events: none;
+  }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+  .toast.error { border-color: var(--danger); color: var(--danger); }
+  .toast.success { border-color: var(--success); color: var(--success); }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div>
+    <div class="header-title">安辰分貨系統</div>
+    <div class="header-sub">ANCHEN SORTING v1.0</div>
+  </div>
+  <div class="batch-tag" onclick="openBatchModal()">
+    📦 <span id="currentBatch">2026-05-11</span>
+  </div>
+</div>
+
+<div class="tabs">
+  <div class="tab active" onclick="switchTab('scan')">📷 掃描</div>
+  <div class="tab" onclick="switchTab('upload')">📤 上傳</div>
+  <div class="tab" onclick="switchTab('progress')">📊 進度</div>
+</div>
+
+<!-- ══════════════════════════════════════
+     SCAN PAGE
+══════════════════════════════════════ -->
+<div class="page active" id="page-scan">
+
+  <div class="scan-status">
+    <div class="scan-step">
+      <div class="step-dot active" id="dot1">1</div>
+      <div class="step-info">
+        <div class="step-label">料號 (QR Code)</div>
+        <div class="step-value" id="val-material">等待掃描...</div>
+      </div>
+    </div>
+    <div class="scan-step">
+      <div class="step-dot waiting" id="dot2">2</div>
+      <div class="step-info">
+        <div class="step-label">訂單號 (條碼)</div>
+        <div class="step-value" id="val-po">等待料號完成</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="camera-wrap">
+    <video id="cameraFeed" autoplay playsinline muted style="display:none"></video>
+    <div class="camera-placeholder" id="cameraPlaceholder">
+      <div class="camera-icon">📷</div>
+      <p>點擊下方按鈕開啟鏡頭掃描條碼</p>
+    </div>
+    <div class="camera-overlay" id="cameraOverlay" style="display:none">
+      <div class="scan-frame">
+        <div class="scan-frame-corner tl"></div>
+        <div class="scan-frame-corner tr"></div>
+        <div class="scan-frame-corner bl"></div>
+        <div class="scan-frame-corner br"></div>
+      </div>
+    </div>
+    <div class="camera-hint" id="cameraHint" style="display:none">對準條碼，自動辨識</div>
+  </div>
+
+  <button class="btn btn-primary" id="scanBtn" onclick="toggleCamera()" style="margin-bottom:12px">
+    開啟鏡頭掃描
+  </button>
+
+  <div class="manual-toggle">
+    <a onclick="toggleManual()">手動輸入</a>
+  </div>
+
+  <div class="manual-input-area" id="manualArea">
+    <div class="input-group">
+      <div class="input-label">料號 MATERIAL CODE</div>
+      <input class="input-field" id="manualMaterial" placeholder="例：47-7870111" type="text">
+    </div>
+    <div class="input-group">
+      <div class="input-label">訂單號 PO NUMBER</div>
+      <input class="input-field" id="manualPO" placeholder="例：9100052343" type="text">
+    </div>
+    <button class="btn btn-primary" onclick="manualSearch()">查詢</button>
+  </div>
+
+  <!-- Single result -->
+  <div class="result-card" id="resultCard">
+    <div class="result-header ok" id="resultHeader">
+      <div class="result-icon" id="resultIcon">✅</div>
+      <div class="result-status" id="resultStatus">找到對應資料</div>
+    </div>
+    <div class="result-body">
+      <div class="hawb-display">
+        <div class="hawb-label">小號 HAWB NO.</div>
+        <div class="hawb-number" id="resultHAWB">AJL-2605014</div>
+        <div class="mawb-line">主號：<span id="resultMAWB">784-6343576</span></div>
+      </div>
+      <div class="info-grid">
+        <div class="info-cell">
+          <div class="info-cell-label">廠商</div>
+          <div class="info-cell-value" id="resultSupplier">瑞鼎</div>
+        </div>
+        <div class="info-cell">
+          <div class="info-cell-label">目的港</div>
+          <div class="info-cell-value" id="resultDest">B18</div>
+        </div>
+        <div class="info-cell">
+          <div class="info-cell-label">料號</div>
+          <div class="info-cell-value" id="resultMaterial2">47-7870111</div>
+        </div>
+        <div class="info-cell">
+          <div class="info-cell-label">訂單號</div>
+          <div class="info-cell-value" id="resultPO2">9100052343</div>
+        </div>
+      </div>
+      <div class="qty-section">
+        <div class="qty-title">到貨進度</div>
+        <div class="qty-bar-wrap">
+          <div class="qty-bar" id="qtyBar" style="width:0%"></div>
+        </div>
+        <div class="qty-numbers">
+          <span class="qty-current">已到 <span id="qtyCurrent">0</span> 箱</span>
+          <span class="qty-total">應到 <span id="qtyTotal">2</span> 箱</span>
+        </div>
+      </div>
+      <div class="qty-input-row" style="margin-bottom:14px">
+        <button class="qty-btn" onclick="adjustQty(-1)">−</button>
+        <input class="qty-input" id="qtyInput" type="number" value="1" min="1">
+        <button class="qty-btn" onclick="adjustQty(1)">＋</button>
+        <button class="btn btn-success btn-sm" onclick="confirmQty()">確認到貨</button>
+      </div>
+      <button class="btn btn-secondary" onclick="resetScan()">重新掃描</button>
+    </div>
+  </div>
+
+  <!-- Multiple results -->
+  <div class="result-card" id="multiCard">
+    <div class="result-header warn">
+      <div class="result-icon">⚠️</div>
+      <div class="result-status">找到多筆對應，請選擇</div>
+    </div>
+    <div class="result-body">
+      <div class="multi-results" id="multiList"></div>
+      <button class="btn btn-secondary" onclick="resetScan()">重新掃描</button>
+    </div>
+  </div>
+
+  <!-- Error result -->
+  <div class="result-card" id="errorCard">
+    <div class="result-header error">
+      <div class="result-icon">❌</div>
+      <div class="result-status">查無資料</div>
+    </div>
+    <div class="result-body" style="padding:16px">
+      <p style="color:var(--text2); font-size:12px; margin-bottom:14px; text-align:center">
+        此組合不在今日清單內，請確認以下哪個有誤
+      </p>
+      <div style="display:flex; flex-direction:column; gap:8px; margin-bottom:16px">
+        <div id="errorMatRow" style="background:var(--surface2); border-radius:8px; padding:10px 12px; display:flex; align-items:center; justify-content:space-between">
+          <div>
+            <div style="font-size:10px; color:var(--text2); margin-bottom:3px">料號 MATERIAL</div>
+            <div style="font-family:var(--mono); font-size:14px;" id="errorMaterial">-</div>
+          </div>
+          <div id="errorMatStatus" style="font-size:18px">⏳</div>
+        </div>
+        <div id="errorPORow" style="background:var(--surface2); border-radius:8px; padding:10px 12px; display:flex; align-items:center; justify-content:space-between">
+          <div>
+            <div style="font-size:10px; color:var(--text2); margin-bottom:3px">訂單號 PO</div>
+            <div style="font-family:var(--mono); font-size:14px;" id="errorPO">-</div>
+          </div>
+          <div id="errorPOStatus" style="font-size:18px">⏳</div>
+        </div>
+      </div>
+      <button class="btn btn-secondary" onclick="resetScan()">重新掃描</button>
+    </div>
+  </div>
+
+  <!-- Duplicate warning modal -->
+  <div class="modal-overlay" id="dupModal" onclick="">
+    <div class="modal-sheet">
+      <div style="text-align:center; margin-bottom:16px">
+        <div style="font-size:36px; margin-bottom:8px">⚠️</div>
+        <div style="font-size:15px; font-weight:700; color:var(--warning)">此貼紙剛剛掃描過</div>
+        <div style="font-size:12px; color:var(--text2); margin-top:6px" id="dupTimeMsg"></div>
+      </div>
+      <div style="background:var(--surface2); border-radius:10px; padding:12px; margin-bottom:16px; font-family:var(--mono); font-size:12px; color:var(--text2)">
+        <div>料號：<span id="dupMaterial" style="color:var(--text)"></span></div>
+        <div style="margin-top:4px">訂單號：<span id="dupPO" style="color:var(--text)"></span></div>
+      </div>
+      <button class="btn btn-success" onclick="dupConfirm()" style="margin-bottom:10px">確定，這是不同箱</button>
+      <button class="btn btn-danger" onclick="dupCancel()">取消，這是誤掃</button>
+    </div>
+  </div>
+
+</div>
+
+<!-- ══════════════════════════════════════
+     UPLOAD PAGE
+══════════════════════════════════════ -->
+<div class="page" id="page-upload">
+
+  <div class="upload-zone" onclick="document.getElementById('fileInput').click()">
+    <div class="upload-icon">📊</div>
+    <div class="upload-title">上傳安辰 Excel 刷單表</div>
+    <div class="upload-sub">點擊選擇 .xlsx 檔案</div>
+  </div>
+  <input type="file" id="fileInput" accept=".xlsx,.xls" onchange="handleFileUpload(event)">
+
+  <div class="preview-section" id="previewSection">
+    <div class="section-title">解析結果預覽</div>
+    <p style="font-size:12px; color:var(--warning); margin-bottom:12px">
+      ⚠️ 請確認每筆資料正確後再存入，可直接點擊欄位修改
+    </p>
+    <div class="preview-scroll">
+      <table class="preview-table" id="previewTable">
+        <thead>
+          <tr>
+            <th>主號</th>
+            <th>小號</th>
+            <th>廠商</th>
+            <th>目的港</th>
+            <th>料號</th>
+            <th>訂單號1</th>
+            <th>訂單號2</th>
+            <th>箱數</th>
+            <th>狀態</th>
+          </tr>
+        </thead>
+        <tbody id="previewBody"></tbody>
+      </table>
+    </div>
+    <button class="btn btn-success" onclick="saveData()" style="margin-bottom:16px">
+      ✅ 確認無誤，存入系統
+    </button>
+    <button class="btn btn-secondary" onclick="clearPreview()">取消</button>
+  </div>
+
+</div>
+
+<!-- ══════════════════════════════════════
+     PROGRESS PAGE
+══════════════════════════════════════ -->
+<div class="page" id="page-progress">
+
+  <div class="progress-filter">
+    <div class="filter-chip active" onclick="filterProgress('all', this)">全部</div>
+    <div class="filter-chip" onclick="filterProgress('complete', this)">已完成</div>
+    <div class="filter-chip" onclick="filterProgress('partial', this)">進行中</div>
+    <div class="filter-chip" onclick="filterProgress('pending', this)">未開始</div>
+  </div>
+
+  <div id="progressList"></div>
+
+</div>
+
+<!-- ══════════════════════════════════════
+     COMPLETE OVERLAY
+══════════════════════════════════════ -->
+<div class="complete-overlay" id="completeOverlay" onclick="this.classList.remove('show')">
+  <div class="complete-icon">🎉</div>
+  <div class="complete-hawb" id="completeHAWB"></div>
+  <div class="complete-msg">此項目貨物已全數到齊！</div>
+  <button class="btn btn-success btn-sm" style="margin-top:8px">繼續掃描</button>
+</div>
+
+<!-- ══════════════════════════════════════
+     BATCH MODAL
+══════════════════════════════════════ -->
+<div class="modal-overlay" id="batchModal" onclick="if(event.target===this)closeBatchModal()">
+  <div class="modal-sheet">
+    <div class="modal-title">選擇批次日期</div>
+    <div id="batchList"></div>
+    <div class="divider"></div>
+    <button class="btn btn-secondary" onclick="closeBatchModal()">取消</button>
+  </div>
+</div>
+
+<!-- TOAST -->
+<div class="toast" id="toast"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script>
+
+// ════════════════════════════════
+// DEMO DATA
+// ════════════════════════════════
+const DEMO_DATA = {
+  "2026-05-11": [
+    { mawb:"784-6355043", hawb:"AJL-2605084", supplier:"瑞鼎", dest:"B3",  material:"47-7014334", po1:"9100050327", po2:"",               qty:1, confirmed:0 },
+    { mawb:"784-6355043", hawb:"AJL-2605079", supplier:"瑞鼎", dest:"B5",  material:"47-7021343", po1:"9100053600", po2:"",               qty:1, confirmed:1 },
+    { mawb:"784-6355043", hawb:"AJL-2605079", supplier:"瑞鼎", dest:"B5",  material:"47-7021343", po1:"9100055105", po2:"",               qty:1, confirmed:0 },
+    { mawb:"784-6355043", hawb:"AJL-2605079", supplier:"瑞鼎", dest:"B5",  material:"47-7021343", po1:"9100052664", po2:"",               qty:2, confirmed:0 },
+    { mawb:"784-6355128", hawb:"AJL-2605088", supplier:"瑞鼎", dest:"B18", material:"47-7015290", po1:"9100041677", po2:"",               qty:1, confirmed:0 },
+    { mawb:"784-6355128", hawb:"AJL-2605088", supplier:"瑞鼎", dest:"B18", material:"47-7013382", po1:"9100051852", po2:"",               qty:6, confirmed:3 },
+    { mawb:"784-6355128", hawb:"AJL-2605081", supplier:"昱博", dest:"B18", material:"47-7001433", po1:"9100050946", po2:"9100050946-00010", qty:1, confirmed:0 },
+    { mawb:"784-6355128", hawb:"AJL-2605081", supplier:"昱博", dest:"B18", material:"47-7001730", po1:"9100050946", po2:"9100050946-00020", qty:1, confirmed:0 },
+    { mawb:"784-6355128", hawb:"AJL-2605077", supplier:"健策", dest:"JCSS",material:"STATS-CHIPSET", po1:"",       po2:"",               qty:2, confirmed:0 },
+    // ── 測試用資料（對應紙本圖片）──
+    { mawb:"784-6343576", hawb:"AJL-2605014", supplier:"聯詠", dest:"B18", material:"47-7870111", po1:"9100052343", po2:"9100052141",     qty:2, confirmed:0 },
+    { mawb:"784-6343576", hawb:"AJL-2605014", supplier:"聯詠", dest:"B18", material:"47-7870237", po1:"9100052343", po2:"9100052141",     qty:7, confirmed:0 },
+    { mawb:"784-6343576", hawb:"AJL-2605014", supplier:"聯詠", dest:"B18", material:"47-7001592", po1:"9100039538", po2:"",               qty:1, confirmed:0 },
+    { mawb:"784-6343576", hawb:"AJL-2605042", supplier:"聯詠", dest:"B18", material:"47-7870254", po1:"9100048586", po2:"9100048218",     qty:1, confirmed:0 },
+    { mawb:"784-6343576", hawb:"AJL-2605042", supplier:"聯詠", dest:"B18", material:"47-7870254", po1:"9100049564", po2:"9100049356",     qty:1, confirmed:0 },
+    { mawb:"784-6343576", hawb:"AJL-2605042", supplier:"聯詠", dest:"B18", material:"47-7801810", po1:"9100049564", po2:"9100049356",     qty:1, confirmed:0 },
+    { mawb:"784-6343576", hawb:"AJL-2605048", supplier:"聯詠", dest:"B18", material:"47-7870227", po1:"9100036343", po2:"9100036090",     qty:1, confirmed:0 },
+  ]
+};
+
+let currentBatch = "2026-05-11";
+let scanData = JSON.parse(JSON.stringify(DEMO_DATA));
+let currentStep = 1;
+let scannedMaterial = "";
+let scannedPO = "";
+let cameraActive = false;
+let cameraStream = null;
+
+// ════════════════════════════════
+// TAB SWITCHING
+// ════════════════════════════════
+function switchTab(tab) {
+  document.querySelectorAll('.tab').forEach((t,i) => {
+    t.classList.toggle('active', ['scan','upload','progress'][i] === tab);
+  });
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.getElementById('page-' + tab).classList.add('active');
+  if(tab === 'progress') renderProgress('all');
+}
+
+// ════════════════════════════════
+// BATCH MODAL
+// ════════════════════════════════
+function openBatchModal() {
+  const list = document.getElementById('batchList');
+  list.innerHTML = '';
+  Object.keys(scanData).sort().reverse().forEach(date => {
+    const batch = scanData[date];
+    const total = batch.reduce((s,r) => s + r.qty, 0);
+    const done = batch.reduce((s,r) => s + r.confirmed, 0);
+    const div = document.createElement('div');
+    div.className = 'batch-option' + (date === currentBatch ? ' selected' : '');
+    div.innerHTML = `<div><div class="batch-date">${date}</div><div class="batch-info">${batch.length} 筆料號</div></div><div class="batch-count">${done}/${total} 箱</div>`;
+    div.onclick = () => { currentBatch = date; document.getElementById('currentBatch').textContent = date; closeBatchModal(); };
+    list.appendChild(div);
+  });
+  document.getElementById('batchModal').classList.add('show');
+}
+function closeBatchModal() {
+  document.getElementById('batchModal').classList.remove('show');
+}
+
+// ════════════════════════════════
+// CAMERA
+// ════════════════════════════════
+async function toggleCamera() {
+  if(cameraActive) {
+    stopCamera();
+    return;
+  }
+  try {
+    cameraStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment', width: { ideal: 1280 } } });
+    const video = document.getElementById('cameraFeed');
+    video.srcObject = cameraStream;
+    video.style.display = 'block';
+    document.getElementById('cameraPlaceholder').style.display = 'none';
+    document.getElementById('cameraOverlay').style.display = 'flex';
+    document.getElementById('cameraHint').style.display = 'block';
+    document.getElementById('scanBtn').textContent = '關閉鏡頭';
+    document.getElementById('scanBtn').className = 'btn btn-secondary';
+    cameraActive = true;
+    startBarcodeScanning();
+  } catch(e) {
+    showToast('無法開啟鏡頭：' + e.message, 'error');
+  }
+}
+
+function stopCamera() {
+  if(cameraStream) { cameraStream.getTracks().forEach(t => t.stop()); cameraStream = null; }
+  const video = document.getElementById('cameraFeed');
+  video.style.display = 'none';
+  document.getElementById('cameraPlaceholder').style.display = 'flex';
+  document.getElementById('cameraOverlay').style.display = 'none';
+  document.getElementById('cameraHint').style.display = 'none';
+  document.getElementById('scanBtn').textContent = '開啟鏡頭掃描';
+  document.getElementById('scanBtn').className = 'btn btn-primary';
+  cameraActive = false;
+}
+
+// ════════════════════════════════
+// 智慧辨識規則
+// ════════════════════════════════
+function extractMaterialAndPO(values) {
+  // values: 從條碼掃出的所有原始字串陣列
+  let material = null;
+  let po = null;
+
+  // 排除規則：日期、重量、序號前綴
+  const isExcluded = v => {
+    if(/^\d{8}$/.test(v) && parseInt(v.substring(0,4)) > 2000) return true; // YYYYMMDD
+    if(/^\d{2}-[A-Z]{3}-\d{4}$/.test(v)) return true; // DD-MMM-YYYY
+    if(/^[27]000\d+/.test(v)) return true; // Packing No
+    if(/^2PK/.test(v)) return true;
+    if(/^(QTY|STP|PCS):/i.test(v)) return true;
+    return false;
+  };
+
+  // 從 QR code 原始內容解析料號（多欄位格式）
+  const parseQRMaterial = raw => {
+    const patterns = [
+      /(?:物料[编碼码]|Material[\s_]?[Cc]ode|P\/NO\.?|PN)[:\s]+([A-Za-z0-9\-]+)/i,
+      /(?:INVOICE\s*NO\.?|INV#?|IN#?)[:\s#]*([0-9]{5,10})/i,
+    ];
+    for(const p of patterns) {
+      const m = raw.match(p);
+      if(m) return m[1].trim();
+    }
+    return null;
+  };
+
+  // 判斷是否為料號格式
+  const isMaterial = v => {
+    if(/^47-\d{6,8}$/i.test(v)) return true;          // 47-XXXXXXX
+    if(/^44\d{8}$/.test(v)) return 'maybe';            // 44XXXXXXXX (10碼，可能料號或訂單號)
+    if(/^440\d{7}$/.test(v)) return true;              // 440XXXXXXX (景碩料號)
+    if(/^SB-[A-Za-z0-9\-]+$/.test(v)) return true;    // SB-XXXX
+    if(/^INV#?\s*\d+$/i.test(v)) return true;         // INV#XXXXXXX
+    return false;
+  };
+
+  // 判斷是否為訂單號格式
+  const isPO = v => {
+    if(/^91\d{8,}/.test(v)) return true;               // 91XXXXXXXX
+    if(/^44\d{8}$/.test(v)) return 'maybe';            // 44XXXXXXXX
+    return false;
+  };
+
+  // 先嘗試從 QR code 解析（長字串含多欄位）
+  for(const v of values) {
+    if(v.length > 30) {
+      const mat = parseQRMaterial(v);
+      if(mat) { material = mat; break; }
+    }
+  }
+
+  // 短值分類
+  const shorts = values.filter(v => v.length <= 30 && !isExcluded(v));
+
+  // 找訂單號（91開頭優先）
+  for(const v of shorts) {
+    if(/^91\d{8,}/.test(v)) { po = v.replace(/-.*$/, ''); break; } // 去掉 -XXXXX 後綴
+  }
+
+  // 找料號（如果 QR 沒解析到）
+  if(!material) {
+    for(const v of shorts) {
+      if(isMaterial(v) === true) { material = v; break; }
+    }
+  }
+
+  // 處理 44 開頭衝突：INV 類型料號 → 44開頭是訂單號；47/SB 料號 → 44開頭是料號
+  if(!po) {
+    const fortyFours = shorts.filter(v => /^44\d{8}$/.test(v));
+    if(fortyFours.length > 0) {
+      const isINVMaterial = material && /^(INV|\d{7})/.test(material);
+      if(isINVMaterial) {
+        po = fortyFours[0]; // 44開頭當訂單號
+      } else if(!material) {
+        material = fortyFours[0]; // 44開頭當料號
+      }
+    }
+  }
+
+  return { material, po };
+}
+
+function startBarcodeScanning() {
+  if(!('BarcodeDetector' in window)) {
+    showToast('此瀏覽器不支援自動條碼辨識，請使用手動輸入', 'error');
+    return;
+  }
+  const detector = new BarcodeDetector({ formats: ['qr_code','code_128','code_39','ean_13','ean_8','upc_a','data_matrix'] });
+  const video = document.getElementById('cameraFeed');
+  let lastKey = "";
+  let lastScanTime = 0;
+
+  async function detect() {
+    if(!cameraActive) return;
+    try {
+      const barcodes = await detector.detect(video);
+      if(barcodes.length > 0) {
+        const now = Date.now();
+        const values = barcodes.map(b => b.rawValue);
+        const key = values.sort().join('|');
+        if(key !== lastKey || now - lastScanTime > 3000) {
+          lastKey = key;
+          lastScanTime = now;
+          const { material, po } = extractMaterialAndPO(values);
+          if(material && po) {
+            // 兩個都找到，直接查詢
+            updateScanUI(material, po);
+            doSearch(material, po);
+          } else if(material && !po) {
+            // 只找到料號
+            scannedMaterial = material;
+            document.getElementById('val-material').textContent = material;
+            document.getElementById('val-material').className = 'step-value filled';
+            document.getElementById('dot1').className = 'step-dot done';
+            document.getElementById('dot1').textContent = '✓';
+            document.getElementById('dot2').className = 'step-dot active';
+            document.getElementById('val-po').textContent = '等待訂單號...';
+            currentStep = 2;
+            playBeep('ok');
+          }
+        }
+      }
+    } catch(e) {}
+    requestAnimationFrame(detect);
+  }
+  detect();
+}
+
+function updateScanUI(material, po) {
+  scannedMaterial = material;
+  scannedPO = po;
+  document.getElementById('val-material').textContent = material;
+  document.getElementById('val-material').className = 'step-value filled';
+  document.getElementById('val-po').textContent = po;
+  document.getElementById('val-po').className = 'step-value filled';
+  document.getElementById('dot1').className = 'step-dot done';
+  document.getElementById('dot1').textContent = '✓';
+  document.getElementById('dot2').className = 'step-dot done';
+  document.getElementById('dot2').textContent = '✓';
+}
+
+// ════════════════════════════════
+// SCAN LOGIC
+// ════════════════════════════════
+function handleScan(value) {
+  // 先嘗試智慧辨識單一值
+  const { material, po } = extractMaterialAndPO([value]);
+  if(currentStep === 1) {
+    const mat = material || value.trim();
+    scannedMaterial = mat;
+    document.getElementById('val-material').textContent = mat;
+    document.getElementById('val-material').className = 'step-value filled';
+    document.getElementById('dot1').className = 'step-dot done';
+    document.getElementById('dot1').textContent = '✓';
+    document.getElementById('dot2').className = 'step-dot active';
+    document.getElementById('val-po').textContent = '等待掃描訂單號...';
+    currentStep = 2;
+    playBeep('ok');
+    showToast('料號已掃描，請掃訂單號', 'success');
+  } else if(currentStep === 2) {
+    const poVal = po || value.replace(/-\d+$/, '').trim();
+    scannedPO = poVal;
+    doSearch(scannedMaterial, poVal);
+  }
+}
+
+function manualSearch() {
+  const mat = document.getElementById('manualMaterial').value.trim();
+  const po = document.getElementById('manualPO').value.trim();
+  if(!mat || !po) { showToast('請輸入料號和訂單號', 'error'); return; }
+  scannedMaterial = mat;
+  scannedPO = po;
+  document.getElementById('val-material').textContent = mat;
+  document.getElementById('val-material').className = 'step-value filled';
+  document.getElementById('dot1').className = 'step-dot done';
+  document.getElementById('dot1').textContent = '✓';
+  doSearch(mat, po);
+}
+
+function doSearch(material, po) {
+  // Clean material: strip trailing *N, normalize uppercase
+  const cleanMat = material.replace(/\s*\*\d+$/, '').trim().toUpperCase();
+  const cleanPO = po.trim().toUpperCase();
+
+  const batch = scanData[currentBatch] || [];
+  const matches = batch.filter(r => {
+    const matMatch = r.material.replace(/\s*\*\d+$/, '').trim().toUpperCase() === cleanMat;
+    const norm = s => String(s||'').trim().toUpperCase();
+    const po1 = norm(r.po1);
+    const po2 = norm(r.po2);
+    // 接受完整比對，或前綴比對（處理 9100050946 vs 9100050946-00010 的情況）
+    const poMatch = po1 === cleanPO || po2 === cleanPO ||
+      (po1 && (cleanPO.startsWith(po1) || po1.startsWith(cleanPO))) ||
+      (po2 && (cleanPO.startsWith(po2) || po2.startsWith(cleanPO)));
+    return matMatch && poMatch;
+  });
+
+  document.getElementById('val-po').textContent = cleanPO;
+  document.getElementById('val-po').className = 'step-value filled';
+  document.getElementById('dot2').className = 'step-dot done';
+  document.getElementById('dot2').textContent = '✓';
+
+  hideAllResults();
+
+  if(matches.length === 0) {
+    // 分項檢查：料號存在嗎？訂單號存在嗎？
+    const matExists = batch.some(r => r.material.replace(/\s*\*\d+$/, '').trim().toUpperCase() === cleanMat);
+    const poExists = batch.some(r => {
+      const norm = s => String(s||'').trim().toUpperCase();
+      const po1 = norm(r.po1); const po2 = norm(r.po2);
+      return po1 === cleanPO || po2 === cleanPO ||
+        (po1 && (cleanPO.startsWith(po1) || po1.startsWith(cleanPO))) ||
+        (po2 && (cleanPO.startsWith(po2) || po2.startsWith(cleanPO)));
+    });
+    document.getElementById('errorMaterial').textContent = cleanMat;
+    document.getElementById('errorPO').textContent = cleanPO;
+    document.getElementById('errorMatStatus').textContent = matExists ? '✅' : '❌';
+    document.getElementById('errorPOStatus').textContent  = poExists  ? '✅' : '❌';
+    document.getElementById('errorMatRow').style.borderLeft = matExists ? '3px solid var(--success)' : '3px solid var(--danger)';
+    document.getElementById('errorPORow').style.borderLeft  = poExists  ? '3px solid var(--success)' : '3px solid var(--danger)';
+    document.getElementById('errorCard').classList.add('show');
+    playBeep('error');
+    if(cameraActive) stopCamera();
+  } else if(matches.length === 1) {
+    checkDuplicate(matches[0], () => showResult(matches[0]));
+    if(cameraActive) stopCamera();
+  } else {
+    showMultiResult(matches);
+    if(cameraActive) stopCamera();
+  }
+}
+
+// ════════════════════════════════
+// 防重複邏輯
+// ════════════════════════════════
+const scanHistory = {}; // key: "material|po", value: timestamp
+let pendingDupCallback = null;
+
+function checkDuplicate(record, callback) {
+  const key = record.material + '|' + record.po1;
+  const now = Date.now();
+  const last = scanHistory[key];
+  if(last) {
+    const diffMs = now - last;
+    const diffSec = Math.floor(diffMs / 1000);
+    const timeStr = diffSec < 60
+      ? diffSec + ' 秒前'
+      : Math.floor(diffSec/60) + ' 分 ' + (diffSec%60) + ' 秒前';
+    document.getElementById('dupMaterial').textContent = record.material;
+    document.getElementById('dupPO').textContent = record.po1 + (record.po2 ? ' / ' + record.po2 : '');
+    document.getElementById('dupTimeMsg').textContent = '上次掃描時間：' + timeStr;
+    pendingDupCallback = callback;
+    document.getElementById('dupModal').classList.add('show');
+    playBeep('warn');
+  } else {
+    scanHistory[key] = now;
+    callback();
+  }
+}
+
+function dupConfirm() {
+  document.getElementById('dupModal').classList.remove('show');
+  const key = scannedMaterial + '|' + scannedPO;
+  scanHistory[key] = Date.now();
+  if(pendingDupCallback) { pendingDupCallback(); pendingDupCallback = null; }
+}
+
+function dupCancel() {
+  document.getElementById('dupModal').classList.remove('show');
+  pendingDupCallback = null;
+  resetScan();
+}
+
+function showResult(record) {
+  document.getElementById('resultHAWB').textContent = record.hawb;
+  document.getElementById('resultMAWB').textContent = record.mawb;
+  document.getElementById('resultSupplier').textContent = record.supplier;
+  document.getElementById('resultDest').textContent = record.dest;
+  document.getElementById('resultMaterial2').textContent = record.material;
+  document.getElementById('resultPO2').textContent = record.po1 + (record.po2 ? ' / ' + record.po2 : '');
+
+  const pct = record.qty > 0 ? Math.min(record.confirmed / record.qty * 100, 100) : 0;
+  document.getElementById('qtyCurrent').textContent = record.confirmed;
+  document.getElementById('qtyTotal').textContent = record.qty;
+  document.getElementById('qtyBar').style.width = pct + '%';
+  document.getElementById('qtyBar').className = 'qty-bar' + (record.confirmed >= record.qty ? ' full' : '');
+  document.getElementById('qtyInput').value = 1;
+  document.getElementById('qtyInput').max = record.qty - record.confirmed;
+
+  document.getElementById('resultCard').classList.add('show');
+  document.getElementById('resultCard')._record = record;
+
+  playHAWB(record.hawb);
+}
+
+function showMultiResult(matches) {
+  const list = document.getElementById('multiList');
+  list.innerHTML = '<div class="multi-label">⚠️ 此料號＋訂單號對應多筆，請選擇正確的小號：</div>';
+  matches.forEach(r => {
+    const div = document.createElement('div');
+    div.className = 'result-option';
+    div.innerHTML = `
+      <div class="result-option-hawb">${r.hawb}</div>
+      <div class="result-option-mawb">主號：${r.mawb}</div>
+      <div class="result-option-detail">廠商：${r.supplier}｜目的港：${r.dest}｜應到：${r.qty}箱</div>
+    `;
+    div.onclick = () => {
+      document.getElementById('multiCard').classList.remove('show');
+      showResult(r);
+    };
+    list.appendChild(div);
+  });
+  document.getElementById('multiCard').classList.add('show');
+  playBeep('warn');
+}
+
+function adjustQty(delta) {
+  const input = document.getElementById('qtyInput');
+  const v = parseInt(input.value) || 1;
+  input.value = Math.max(1, v + delta);
+}
+
+function confirmQty() {
+  const card = document.getElementById('resultCard');
+  const record = card._record;
+  if(!record) return;
+
+  const adding = parseInt(document.getElementById('qtyInput').value) || 1;
+  const newConfirmed = Math.min(record.confirmed + adding, record.qty);
+  record.confirmed = newConfirmed;
+
+  const pct = record.qty > 0 ? Math.min(newConfirmed / record.qty * 100, 100) : 0;
+  document.getElementById('qtyCurrent').textContent = newConfirmed;
+  document.getElementById('qtyBar').style.width = pct + '%';
+  document.getElementById('qtyInput').max = record.qty - newConfirmed;
+
+  if(newConfirmed >= record.qty) {
+    document.getElementById('qtyBar').className = 'qty-bar full';
+    playBeep('complete');
+    showCompleteOverlay(record.hawb);
+  } else {
+    playBeep('ok');
+    showToast(`已確認 ${adding} 箱`, 'success');
+  }
+}
+
+function showCompleteOverlay(hawb) {
+  document.getElementById('completeHAWB').textContent = hawb;
+  document.getElementById('completeOverlay').classList.add('show');
+  setTimeout(() => {
+    document.getElementById('completeOverlay').classList.remove('show');
+    resetScan();
+  }, 3000);
+}
+
+function resetScan() {
+  currentStep = 1;
+  scannedMaterial = "";
+  scannedPO = "";
+  document.getElementById('val-material').textContent = '等待掃描...';
+  document.getElementById('val-material').className = 'step-value';
+  document.getElementById('val-po').textContent = '等待料號完成';
+  document.getElementById('val-po').className = 'step-value';
+  document.getElementById('dot1').className = 'step-dot active';
+  document.getElementById('dot1').textContent = '1';
+  document.getElementById('dot2').className = 'step-dot waiting';
+  document.getElementById('dot2').textContent = '2';
+  document.getElementById('manualMaterial').value = '';
+  document.getElementById('manualPO').value = '';
+  hideAllResults();
+}
+
+function hideAllResults() {
+  document.getElementById('resultCard').classList.remove('show');
+  document.getElementById('multiCard').classList.remove('show');
+  document.getElementById('errorCard').classList.remove('show');
+}
+
+function toggleManual() {
+  document.getElementById('manualArea').classList.toggle('show');
+}
+
+// ════════════════════════════════
+// UPLOAD & PARSE
+// ════════════════════════════════
+function handleFileUpload(event) {
+  const file = event.target.files[0];
+  if(!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    try {
+      const data = new Uint8Array(e.target.result);
+      const wb = XLSX.read(data, { type: 'array' });
+      const parsed = parseAnChenExcel(wb);
+      renderPreview(parsed);
+    } catch(err) {
+      showToast('解析失敗：' + err.message, 'error');
+    }
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+function parseAnChenExcel(wb) {
+  const results = [];
+  wb.SheetNames.forEach(sheetName => {
+    const ws = wb.Sheets[sheetName];
+    const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null });
+
+    // Find MAWB
+    let mawb = '';
+    let batchDate = currentBatch;
+    for(let i = 0; i < Math.min(10, rows.length); i++) {
+      const row = rows[i];
+      for(let j = 0; j < row.length; j++) {
+        const cell = String(row[j] || '');
+        if(cell.includes('MAWB') || cell.includes('主單號')) {
+          mawb = String(row[j+1] || row[j+2] || '').trim();
+        }
+        if(cell.includes('出貨日期') && row[j+1]) {
+          try {
+            const d = new Date(row[j+1]);
+            if(!isNaN(d)) batchDate = d.toISOString().split('T')[0];
+          } catch(e) {}
+        }
+      }
+    }
+
+    // Find header row
+    let headerRow = -1;
+    for(let i = 0; i < rows.length; i++) {
+      const row = rows[i].map(c => String(c||''));
+      if(row.some(c => c.includes('料號')) && row.some(c => c.includes('訂單號'))) {
+        headerRow = i;
+        break;
+      }
+    }
+    if(headerRow < 0) return;
+
+    // Find column indices
+    const headers = rows[headerRow].map(c => String(c||''));
+    let colSupplier = -1, colDest = -1, colHawb = -1, colMaterial = -1, colPO = -1;
+    headers.forEach((h, i) => {
+      if(h.includes('SHIPPER') || h.includes('廠商')) colSupplier = i;
+      if((h.includes('目的港') || h.includes('廠區')) && colDest < 0) colDest = i;
+      if(h.includes('小號') || h.includes('HAWB')) colHawb = i;
+      if(h.includes('料號')) colMaterial = i;
+      if(h.includes('訂單號')) colPO = i;
+    });
+
+    // Parse data rows
+    let lastSupplier = '', lastDest = '', lastHawb = '';
+    for(let i = headerRow + 2; i < rows.length; i++) {
+      const row = rows[i];
+      if(!row || row.every(c => !c)) continue;
+
+      const supplier = String(row[colSupplier] || '').trim() || lastSupplier;
+      const dest = String(row[colDest] || '').trim() || lastDest;
+      const hawb = String(row[colHawb] || '').trim() || lastHawb;
+      const materialRaw = String(row[colMaterial] || '').trim();
+      const poRaw = String(row[colPO] || '').trim();
+
+      if(supplier) lastSupplier = supplier;
+      if(dest) lastDest = dest;
+      if(hawb) lastHawb = hawb;
+
+      if(!materialRaw && !poRaw) continue;
+
+      // Extract qty from material (*N)
+      let material = materialRaw;
+      let qty = 1;
+      const qtyMatch = materialRaw.match(/\*(\d+)/);
+      if(qtyMatch) { qty = parseInt(qtyMatch[1]); material = materialRaw.replace(/\s*\*\d+/, '').trim(); }
+
+      // Split dual PO
+      const poMatch = poRaw.match(/^([^\(]+?)(?:\s*\(([^\)]+)\))?$/);
+      const po1 = poMatch ? poMatch[1].trim() : poRaw;
+      const po2 = poMatch && poMatch[2] ? poMatch[2].trim() : '';
+
+      results.push({ mawb, hawb: lastHawb, supplier: lastSupplier, dest: lastDest, material, po1, po2, qty, confirmed: 0, _batchDate: batchDate, _warn: !material || !po1 });
+    }
+  });
+  return results;
+}
+
+function renderPreview(data) {
+  const tbody = document.getElementById('previewBody');
+  tbody.innerHTML = '';
+  data.forEach((r, idx) => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td><input class="editable" value="${r.mawb}" data-idx="${idx}" data-field="mawb"></td>
+      <td><input class="editable" value="${r.hawb}" data-idx="${idx}" data-field="hawb"></td>
+      <td><input class="editable" value="${r.supplier}" data-idx="${idx}" data-field="supplier"></td>
+      <td><input class="editable" value="${r.dest}" data-idx="${idx}" data-field="dest"></td>
+      <td><input class="editable" value="${r.material}" data-idx="${idx}" data-field="material"></td>
+      <td><input class="editable" value="${r.po1}" data-idx="${idx}" data-field="po1"></td>
+      <td><input class="editable" value="${r.po2}" data-idx="${idx}" data-field="po2"></td>
+      <td><input class="editable" value="${r.qty}" data-idx="${idx}" data-field="qty" type="number" min="1" style="width:60px"></td>
+      <td><span class="tag ${r._warn ? 'tag-warn' : 'tag-ok'}">${r._warn ? '確認' : 'OK'}</span></td>
+    `;
+    tbody.appendChild(tr);
+  });
+  tbody.querySelectorAll('.editable').forEach(input => {
+    input.addEventListener('change', e => {
+      const idx = e.target.dataset.idx;
+      const field = e.target.dataset.field;
+      data[idx][field] = e.target.value;
+      if(data[idx].material && data[idx].po1) {
+        const tr = e.target.closest('tr');
+        tr.querySelector('.tag').className = 'tag tag-ok';
+        tr.querySelector('.tag').textContent = 'OK';
+        data[idx]._warn = false;
+      }
+    });
+  });
+  document.getElementById('previewSection').classList.add('show');
+  window._previewData = data;
+}
+
+function saveData() {
+  const data = window._previewData;
+  if(!data) return;
+
+  // 檢查重複小號警示
+  const hawbCount = {};
+  data.forEach(r => { hawbCount[r.hawb] = (hawbCount[r.hawb]||0) + 1; });
+  const dupHawbs = Object.entries(hawbCount).filter(([h,c]) => c > 1).map(([h]) => h);
+  if(dupHawbs.length > 0) {
+    const confirmDup = confirm('⚠️ 發現重複小號：\n' + dupHawbs.join(', ') + '\n\n這可能是安辰資料有誤，確定要繼續存入嗎？');
+    if(!confirmDup) return;
+  }
+
+  const batchDate = data[0]?._batchDate || currentBatch;
+  if(!scanData[batchDate]) scanData[batchDate] = [];
+  data.forEach(r => {
+    scanData[batchDate].push({ mawb: r.mawb, hawb: r.hawb, supplier: r.supplier, dest: r.dest, material: r.material, po1: r.po1, po2: r.po2, qty: parseInt(r.qty)||1, confirmed: 0 });
+  });
+  clearPreview();
+  showToast(`已存入 ${data.length} 筆資料`, 'success');
+  switchTab('scan');
+}
+
+function clearPreview() {
+  document.getElementById('previewSection').classList.remove('show');
+  document.getElementById('fileInput').value = '';
+  window._previewData = null;
+}
+
+// ════════════════════════════════
+// PROGRESS
+// ════════════════════════════════
+function renderProgress(filter) {
+  const batch = scanData[currentBatch] || [];
+  const byHawb = {};
+  batch.forEach(r => {
+    if(!byHawb[r.hawb]) byHawb[r.hawb] = { mawb: r.mawb, hawb: r.hawb, items: [] };
+    byHawb[r.hawb].items.push(r);
+  });
+
+  const list = document.getElementById('progressList');
+  list.innerHTML = '';
+
+  Object.values(byHawb).forEach(group => {
+    const totalQty = group.items.reduce((s,r) => s + r.qty, 0);
+    const totalConf = group.items.reduce((s,r) => s + r.confirmed, 0);
+    const status = totalConf === 0 ? 'pending' : totalConf >= totalQty ? 'complete' : 'partial';
+    if(filter !== 'all' && filter !== status) return;
+
+    const card = document.createElement('div');
+    card.className = 'progress-card';
+
+    const badgeClass = { complete: 'badge-complete', partial: 'badge-partial', pending: 'badge-pending' }[status];
+    const badgeText = { complete: '✅ 已到齊', partial: '🔄 進行中', pending: '⏳ 未開始' }[status];
+
+    let itemsHtml = group.items.map(r => {
+      const pct = r.qty > 0 ? Math.min(r.confirmed / r.qty * 100, 100) : 0;
+      const poDisplay = r.po1 + (r.po2 ? ' / ' + r.po2 : '');
+      return `<div class="progress-item" style="flex-direction:column; align-items:flex-start; gap:4px; padding:8px 0; border-bottom:1px solid var(--border)">
+        <div style="display:flex; width:100%; align-items:center; gap:8px">
+          <div class="progress-item-code" style="font-size:13px">${r.material}</div>
+          <div class="mini-bar-wrap" style="flex:1"><div class="mini-bar ${r.confirmed>=r.qty?'full':''}" style="width:${pct}%"></div></div>
+          <div class="progress-item-qty">${r.confirmed}/${r.qty}箱</div>
+        </div>
+        <div style="font-size:11px; color:var(--text2); font-family:var(--mono)">訂單號：${poDisplay}</div>
+      </div>`;
+    }).join('');
+
+    card.innerHTML = `
+      <div class="progress-card-header">
+        <div>
+          <div class="progress-hawb">${group.hawb}</div>
+          <div class="progress-mawb">主號：${group.mawb}</div>
+        </div>
+        <div class="progress-badge ${badgeClass}">${badgeText}</div>
+      </div>
+      <div class="progress-items">${itemsHtml}</div>
+    `;
+    list.appendChild(card);
+  });
+
+  if(list.children.length === 0) {
+    list.innerHTML = '<p style="text-align:center; color:var(--text2); font-size:13px; padding:40px 0">此批次暫無資料</p>';
+  }
+}
+
+function filterProgress(filter, el) {
+  document.querySelectorAll('.filter-chip').forEach(c => c.classList.remove('active'));
+  el.classList.add('active');
+  renderProgress(filter);
+}
+
+// ════════════════════════════════
+// AUDIO
+// ════════════════════════════════
+const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+function playBeep(type) {
+  try {
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    const configs = {
+      ok: { freq: 880, dur: 0.1, type: 'sine' },
+      warn: { freq: 440, dur: 0.3, type: 'triangle' },
+      error: { freq: 220, dur: 0.4, type: 'sawtooth' },
+      complete: { freq: 1047, dur: 0.6, type: 'sine' }
+    };
+    const c = configs[type] || configs.ok;
+    osc.frequency.value = c.freq;
+    osc.type = c.type;
+    gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + c.dur);
+    osc.start();
+    osc.stop(audioCtx.currentTime + c.dur);
+    if(type === 'complete') {
+      setTimeout(() => {
+        const o2 = audioCtx.createOscillator();
+        const g2 = audioCtx.createGain();
+        o2.connect(g2); g2.connect(audioCtx.destination);
+        o2.frequency.value = 1319;
+        o2.type = 'sine';
+        g2.gain.setValueAtTime(0.3, audioCtx.currentTime);
+        g2.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.5);
+        o2.start(); o2.stop(audioCtx.currentTime + 0.5);
+      }, 200);
+    }
+  } catch(e) {}
+}
+
+function playHAWB(hawb) {
+  const nums = hawb.replace(/[^0-9]/g, '');
+  if(!nums || !window.speechSynthesis) { playBeep('ok'); return; }
+  const utterance = new SpeechSynthesisUtterance(nums.split('').join(' '));
+  utterance.lang = 'zh-TW';
+  utterance.rate = 0.9;
+  utterance.pitch = 1.1;
+  speechSynthesis.speak(utterance);
+}
+
+// ════════════════════════════════
+// TOAST
+// ════════════════════════════════
+let toastTimer;
+function showToast(msg, type='') {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = 'toast show' + (type ? ' ' + type : '');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { t.className = 'toast'; }, 2500);
+}
+
+</script>
+</body>
+</html>
