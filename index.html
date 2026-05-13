@@ -1130,26 +1130,46 @@ function extractMaterialAndPO(values) {
     return false;
   };
 
-  // 從 QR code 原始內容解析料號（多欄位格式）
+  // 從 QR code 原始內容解析料號
   const parseQRMaterial = raw => {
+    // 先找 47-XXXXXXX 格式（不管前後是什麼字）
+    let m = raw.match(/\b(47-\d{7})\b/);
+    if(m) return m[1];
+    // 再找 44XXXXXXXX 格式
+    m = raw.match(/\b(44\d{8})\b/);
+    if(m) return m[1];
+    // SB- 開頭
+    m = raw.match(/\b(SB-[A-Z0-9\-]+)\b/);
+    if(m) return m[1];
+    // 帶標籤的格式
     const patterns = [
       /(?:物料[编碼码]|Material[\s_]?[Cc]ode|P\/NO\.?|PN)[:\s]+([A-Za-z0-9\-]+)/i,
       /(?:INVOICE\s*NO\.?|INV#?|IN#?)[:\s#]*([0-9]{5,10})/i,
     ];
     for(const p of patterns) {
-      const m = raw.match(p);
-      if(m) return m[1].trim();
+      const mm = raw.match(p);
+      if(mm) return mm[1].trim();
     }
     return null;
   };
 
-  // 判斷是否為料號格式
+  // 從 QR code 原始內容解析訂單號
+  const parseQRPO = raw => {
+    let m = raw.match(/\b(91\d{8,})\b/);
+    if(m) return m[1].replace(/-.*$/, '');
+    m = raw.match(/\b(44\d{8})\b/);
+    if(m) return m[1];
+    m = raw.match(/(?:PO[\s.:]*N[OoO]?\.?|訂單[號号])[:\s]*([0-9\-]+)/i);
+    if(m) return m[1].replace(/-.*$/, '');
+    return null;
+  };
+
+  // 判斷是否為料號格式（嚴格）
   const isMaterial = v => {
-    if(/^47-\d{6,8}$/i.test(v)) return true;          // 47-XXXXXXX
-    if(/^44\d{8}$/.test(v)) return 'maybe';            // 44XXXXXXXX (10碼，可能料號或訂單號)
-    if(/^440\d{7}$/.test(v)) return true;              // 440XXXXXXX (景碩料號)
-    if(/^SB-[A-Za-z0-9\-]+$/.test(v)) return true;    // SB-XXXX
-    if(/^INV#?\s*\d+$/i.test(v)) return true;         // INV#XXXXXXX
+    if(/^47-\d{7}$/.test(v)) return true;              // 47-XXXXXXX（7碼）
+    if(/^44\d{8}$/.test(v)) return 'maybe';            // 44XXXXXXXX (10碼)
+    if(/^SB-[A-Za-z0-9\-]+$/.test(v)) return true;
+    if(/^INV#?\s*\d{5,8}$/i.test(v)) return true;
     return false;
   };
 
@@ -1160,23 +1180,28 @@ function extractMaterialAndPO(values) {
     return false;
   };
 
-  // 先嘗試從 QR code 解析（長字串含多欄位）
+  // 處理每個掃到的值：可能是長 QR 或短條碼
   for(const v of values) {
-    if(v.length > 30) {
+    // 不管長短，都嘗試從中抽取料號和訂單號
+    if(!material) {
       const mat = parseQRMaterial(v);
-      if(mat) { material = mat; break; }
+      if(mat) material = mat;
+    }
+    if(!po) {
+      const p = parseQRPO(v);
+      if(p) po = p;
     }
   }
 
-  // 短值分類
+  // 短值再次掃描（補強）
   const shorts = values.filter(v => v.length <= 30 && !isExcluded(v));
 
-  // 找訂單號（91開頭優先）
-  for(const v of shorts) {
-    if(/^91\d{8,}/.test(v)) { po = v.replace(/-.*$/, ''); break; } // 去掉 -XXXXX 後綴
+  if(!po) {
+    for(const v of shorts) {
+      if(/^91\d{8,}/.test(v)) { po = v.replace(/-.*$/, ''); break; }
+    }
   }
 
-  // 找料號（如果 QR 沒解析到）
   if(!material) {
     for(const v of shorts) {
       if(isMaterial(v) === true) { material = v; break; }
@@ -1211,21 +1236,52 @@ function startBarcodeScanning() {
     try {
       if(zxingReader) { try { zxingReader.reset(); } catch(e){} }
       zxingReader = new ZXing.BrowserMultiFormatReader();
+      // 累積最近掃到的所有條碼值（5秒內）
+      const recentScans = new Map(); // value -> timestamp
+
       zxingReader.decodeFromVideoDevice(null, 'cameraFeed', (result, err) => {
         if(!cameraActive) return;
         if(result) {
           const now = Date.now();
           const value = result.getText();
+          recentScans.set(value, now);
+          // 清掉超過5秒的舊掃描
+          for(const [k, t] of recentScans) {
+            if(now - t > 5000) recentScans.delete(k);
+          }
+
           if(value !== lastKey || now - lastScanTime > 2000) {
             lastKey = value;
             lastScanTime = now;
-            // 先嘗試智慧辨識
-            const { material, po } = extractMaterialAndPO([value]);
+            showToast('掃到：' + value.substring(0, 50), '');
+            console.log('[掃描原始值]', value);
+
+            // 用最近5秒所有掃到的值一起辨識
+            const allValues = Array.from(recentScans.keys());
+            const { material, po } = extractMaterialAndPO(allValues);
+            console.log('[累積值]', allValues, '[辨識結果]', { material, po });
+
             if(material && po) {
               updateScanUI(material, po);
               doSearch(material, po);
-            } else {
-              handleScan(value);
+              recentScans.clear();
+            } else if(material) {
+              scannedMaterial = material;
+              document.getElementById('val-material').textContent = material;
+              document.getElementById('val-material').className = 'step-value filled';
+              document.getElementById('dot1').className = 'step-dot done';
+              document.getElementById('dot1').textContent = '✓';
+              document.getElementById('dot2').className = 'step-dot active';
+              document.getElementById('val-po').textContent = '等待訂單號...';
+              currentStep = 2;
+              playBeep('ok');
+            } else if(po) {
+              scannedPO = po;
+              document.getElementById('val-po').textContent = po;
+              document.getElementById('val-po').className = 'step-value filled';
+              document.getElementById('dot2').className = 'step-dot done';
+              document.getElementById('dot2').textContent = '✓';
+              playBeep('ok');
             }
           }
         }
