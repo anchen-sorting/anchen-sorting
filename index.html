@@ -1439,30 +1439,52 @@ function parseAnChenExcel(wb) {
 
     let batchDate = currentBatch;
 
-    // 找標題列：含「料號」和「訂單號」的那一行
+    // 找標題列：每一格內容必須是短欄位名稱（不超過15字），且包含「料號」「訂單」「主號」其中至少兩個
     let headerRow = -1;
     for(let i = 0; i < rows.length; i++) {
-      const row = (rows[i]||[]).map(c => String(c||''));
-      if(row.some(c => c.includes('料號')) && row.some(c => c.includes('訂單'))) {
+      const row = (rows[i]||[]).map(c => String(c||'').trim());
+      // 統計關鍵字出現次數
+      let keywords = 0;
+      let hasShortCells = true;
+      let nonEmptyCells = 0;
+      for(const c of row) {
+        if(c) {
+          nonEmptyCells++;
+          if(c.length > 15) { hasShortCells = false; break; }
+          if(c.match(/^(主號|小號|廠商|目的港|料號|訂單號|箱數|備註)/) || c.match(/(MAWB|HAWB|SHIPPER)/i)) keywords++;
+        }
+      }
+      // 標題列：至少4個關鍵字欄位，且所有非空格都是短文字
+      if(hasShortCells && keywords >= 4 && nonEmptyCells >= 5) {
         headerRow = i;
         break;
       }
     }
-    if(headerRow < 0) return;
+    if(headerRow < 0) {
+      console.error('找不到標題列');
+      return;
+    }
+    console.log('標題列在第', headerRow+1, '行:', rows[headerRow]);
 
     // 找欄位索引（直接按欄位名稱比對）
     const headers = (rows[headerRow]||[]).map(c => String(c||''));
     let colMawb=-1, colHawb=-1, colSupplier=-1, colDest=-1, colMaterial=-1, colPO1=-1, colPO2=-1, colQty=-1;
     headers.forEach((h, i) => {
-      const hh = h.replace(/\s/g,'');
-      if((hh.includes('主號')||hh.includes('MAWB')) && colMawb<0) colMawb = i;
-      if((hh.includes('小號')||hh.includes('HAWB')) && colHawb<0) colHawb = i;
-      if((hh.includes('廠商')||hh.includes('SHIPPER')) && colSupplier<0) colSupplier = i;
-      if((hh.includes('目的港')||hh.includes('廠區')) && colDest<0) colDest = i;
-      if(hh.includes('料號') && colMaterial<0) colMaterial = i;
-      if((hh==='訂單號1'||hh==='訂單號') && colPO1<0) colPO1 = i;
-      if(hh.includes('訂單號2') && colPO2<0) colPO2 = i;
-      if(hh.includes('箱數') && colQty<0) colQty = i;
+      const hh = h.replace(/\s/g,'').trim();
+      if(!hh) return;
+      // 用「起始字」優先匹配，避免「主單號，格式如...」這種說明文字被當成標題
+      if(/^(主號|MAWB)/.test(hh) && colMawb<0) colMawb = i;
+      else if(/^(小號|HAWB)/.test(hh) && colHawb<0) colHawb = i;
+      else if(/^(廠商|SHIPPER)/i.test(hh) && colSupplier<0) colSupplier = i;
+      else if(/^(目的港|廠區)/.test(hh) && colDest<0) colDest = i;
+      else if(/^料號$|^料號\(/.test(hh) && colMaterial<0) colMaterial = i;
+      else if(hh==='料號' && colMaterial<0) colMaterial = i;
+      else if(/^料號/.test(hh) && hh.length <= 10 && colMaterial<0) colMaterial = i;
+      else if(/^訂單號1/.test(hh) && colPO1<0) colPO1 = i;
+      else if(/^訂單號2/.test(hh) && colPO2<0) colPO2 = i;
+      else if(/^訂單號$/.test(hh) && colPO1<0) colPO1 = i;
+      else if(/^訂單號/.test(hh) && hh.length <= 10 && colPO1<0) colPO1 = i;
+      else if(/^箱數/.test(hh) && colQty<0) colQty = i;
     });
 
     console.log('欄位索引:', {colMawb,colHawb,colSupplier,colDest,colMaterial,colPO1,colPO2,colQty});
