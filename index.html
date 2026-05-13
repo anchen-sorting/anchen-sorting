@@ -967,6 +967,12 @@ async function toggleCamera() {
     stopCamera();
     return;
   }
+  // 用戶點擊時初始化語音（解除瀏覽器自動播放限制）
+  try {
+    const unlock = new SpeechSynthesisUtterance('');
+    speechSynthesis.speak(unlock);
+    speechSynthesis.cancel();
+  } catch(e) {}
   try {
     cameraStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment', width: { ideal: 1280 } } });
     const video = document.getElementById('cameraFeed');
@@ -1168,6 +1174,8 @@ function handleScan(value) {
 }
 
 function manualSearch() {
+  // 初始化語音
+  try { const u = new SpeechSynthesisUtterance(''); speechSynthesis.speak(u); speechSynthesis.cancel(); } catch(e) {}
   const mat = document.getElementById('manualMaterial').value.trim();
   const po = document.getElementById('manualPO').value.trim();
   if(!mat || !po) { showToast('請輸入料號和訂單號', 'error'); return; }
@@ -1609,13 +1617,16 @@ function playBeep(type) {
 function playHAWB(hawb) {
   const nums = hawb.replace(/[^0-9]/g, '');
   if(!nums || !window.speechSynthesis) { playBeep('ok'); return; }
-  // 只唸後五碼
   const last5 = nums.slice(-5);
-  const utterance = new SpeechSynthesisUtterance(last5.split('').join(' '));
-  utterance.lang = 'zh-TW';
-  utterance.rate = 0.9;
-  utterance.pitch = 1.1;
-  speechSynthesis.speak(utterance);
+  speechSynthesis.cancel();
+  setTimeout(() => {
+    const utterance = new SpeechSynthesisUtterance(last5.split('').join(' '));
+    utterance.lang = 'zh-TW';
+    utterance.rate = 0.85;
+    utterance.pitch = 1.1;
+    utterance.volume = 1.0;
+    speechSynthesis.speak(utterance);
+  }, 100);
 }
 
 // ════════════════════════════════
