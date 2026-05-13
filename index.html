@@ -890,7 +890,93 @@
 <div class="toast" id="toast"></div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
+
+// ════════════════════════════════
+// SUPABASE 初始化
+// ════════════════════════════════
+const SUPABASE_URL = 'https://pqgjrfdnyeopqfzntqis.supabase.co';
+const SUPABASE_KEY = 'sb_publishable_XSwK5cq3nvUCPwiLoSWMuA_Xna5GXyr';
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+// 從資料庫載入批次資料
+async function loadBatchFromDB(date) {
+  const { data, error } = await sb
+    .from('sorting_data')
+    .select('*')
+    .eq('batch_date', date);
+  if(error) { console.error('載入失敗:', error); return []; }
+  return data.map(r => ({
+    mawb: r.mawb||'', hawb: r.hawb||'', supplier: r.supplier||'',
+    dest: r.dest||'', material: r.material, po1: r.po1, po2: r.po2||'',
+    qty: r.qty||null, _id: r.id
+  }));
+}
+
+// 取得所有批次日期
+async function loadBatchDates() {
+  const { data, error } = await sb
+    .from('sorting_data')
+    .select('batch_date')
+    .order('batch_date', { ascending: false });
+  if(error || !data) return [];
+  const dates = [...new Set(data.map(r => r.batch_date))];
+  return dates;
+}
+
+// 儲存一筆資料到資料庫
+async function saveRowToDB(row, batchDate) {
+  const payload = {
+    batch_date: batchDate,
+    mawb: row.mawb||null,
+    hawb: row.hawb||null,
+    supplier: row.supplier||null,
+    dest: row.dest||null,
+    material: row.material,
+    po1: row.po1,
+    po2: row.po2||null,
+    qty: row.qty ? parseInt(row.qty) : null,
+    updated_at: new Date().toISOString()
+  };
+  // 先查是否已存在
+  const { data: existing } = await sb
+    .from('sorting_data')
+    .select('id, mawb, hawb, supplier, dest, qty')
+    .eq('batch_date', batchDate)
+    .eq('material', row.material)
+    .eq('po1', row.po1)
+    .maybeSingle();
+
+  if(!existing) {
+    const { error } = await sb.from('sorting_data').insert(payload);
+    if(error) throw error;
+    return 'added';
+  } else {
+    // 找出衝突欄位
+    const fields = ['mawb','hawb','supplier','dest','qty'];
+    const diff = fields.filter(f => payload[f] && existing[f] && String(payload[f]) !== String(existing[f]));
+    if(diff.length > 0) return { conflict: true, existing, newR: payload, diff, id: existing.id };
+    // 補空白欄位
+    const update = {};
+    fields.forEach(f => { if(payload[f] && !existing[f]) update[f] = payload[f]; });
+    if(row.po2 && !existing.po2) update.po2 = row.po2;
+    if(Object.keys(update).length > 0) {
+      update.updated_at = new Date().toISOString();
+      await sb.from('sorting_data').update(update).eq('id', existing.id);
+    }
+    return 'updated';
+  }
+}
+
+// 強制更新一筆
+async function forceUpdateRow(id, newR) {
+  await sb.from('sorting_data').update({
+    mawb: newR.mawb, hawb: newR.hawb, supplier: newR.supplier,
+    dest: newR.dest, qty: newR.qty ? parseInt(newR.qty) : null,
+    updated_at: new Date().toISOString()
+  }).eq('id', id);
+}
 
 // ════════════════════════════════
 // DEMO DATA
@@ -940,20 +1026,41 @@ function switchTab(tab) {
 // ════════════════════════════════
 // BATCH MODAL
 // ════════════════════════════════
-function openBatchModal() {
+async function openBatchModal() {
   const list = document.getElementById('batchList');
+  list.innerHTML = '<p style="color:var(--text2);font-size:13px;text-align:center;padding:20px">載入中...</p>';
+  document.getElementById('batchModal').classList.add('show');
+
+  // 從資料庫取批次日期
+  const dbDates = await loadBatchDates();
+  // 合併本地 demo 日期
+  const allDates = [...new Set([...dbDates, ...Object.keys(scanData)])].sort().reverse();
+
   list.innerHTML = '';
-  Object.keys(scanData).sort().reverse().forEach(date => {
-    const batch = scanData[date];
-    const total = batch.reduce((s,r) => s + r.qty, 0);
-    const done = batch.reduce((s,r) => s + r.confirmed, 0);
+  if(allDates.length === 0) {
+    list.innerHTML = '<p style="color:var(--text2);font-size:13px;text-align:center;padding:20px">尚無批次資料</p>';
+    return;
+  }
+  allDates.forEach(date => {
+    const local = scanData[date];
+    const count = local ? local.length : '?';
     const div = document.createElement('div');
     div.className = 'batch-option' + (date === currentBatch ? ' selected' : '');
-    div.innerHTML = `<div><div class="batch-date">${date}</div><div class="batch-info">${batch.length} 筆料號</div></div><div class="batch-count">${done}/${total} 箱</div>`;
-    div.onclick = () => { currentBatch = date; document.getElementById('currentBatch').textContent = date; closeBatchModal(); };
+    div.innerHTML = `<div><div class="batch-date">${date}</div><div class="batch-info">${dbDates.includes(date) ? '雲端資料' : '本地資料'}</div></div><div class="batch-count">${count} 筆</div>`;
+    div.onclick = async () => {
+      currentBatch = date;
+      document.getElementById('currentBatch').textContent = date;
+      closeBatchModal();
+      // 從資料庫載入這個批次
+      if(dbDates.includes(date)) {
+        showToast('載入批次資料...', '');
+        const rows = await loadBatchFromDB(date);
+        scanData[date] = rows;
+        showToast(`已載入 ${rows.length} 筆`, 'success');
+      }
+    };
     list.appendChild(div);
   });
-  document.getElementById('batchModal').classList.add('show');
 }
 function closeBatchModal() {
   document.getElementById('batchModal').classList.remove('show');
@@ -1441,11 +1548,11 @@ function renderPreview(data) {
   window._previewData = data;
 }
 
-function saveData() {
+async function saveData() {
   const data = window._previewData;
   if(!data) return;
 
-  // 檢查重複小號警示（安辰資料有誤的情況）
+  // 檢查重複小號警示
   const hawbCount = {};
   data.forEach(r => { hawbCount[r.hawb] = (hawbCount[r.hawb]||0) + 1; });
   const dupHawbs = Object.entries(hawbCount).filter(([h,c]) => c > 1).map(([h]) => h);
@@ -1459,32 +1566,27 @@ function saveData() {
 
   let added = 0, updated = 0, conflicts = [];
 
-  data.forEach(newR => {
-    const key = (newR.material||'').toUpperCase() + '|' + (newR.po1||'').toUpperCase();
-    const existing = scanData[batchDate].find(r =>
-      (r.material||'').toUpperCase() === (newR.material||'').toUpperCase() &&
-      (r.po1||'').toUpperCase() === (newR.po1||'').toUpperCase()
-    );
+  showToast('儲存中...', '');
 
-    if(!existing) {
-      scanData[batchDate].push({ mawb:newR.mawb, hawb:newR.hawb, supplier:newR.supplier, dest:newR.dest, material:newR.material, po1:newR.po1, po2:newR.po2, qty:parseInt(newR.qty)||1 });
-      added++;
-    } else {
-      // 檢查有無衝突欄位
-      const fields = ['mawb','hawb','supplier','dest','qty'];
-      const diff = fields.filter(f => newR[f] && existing[f] && String(newR[f]) !== String(existing[f]));
-      if(diff.length > 0) {
-        conflicts.push({ existing, newR, diff });
-      } else {
-        // 補空白欄位，靜默更新
-        fields.forEach(f => { if(newR[f] && !existing[f]) existing[f] = newR[f]; });
-        if(newR.po2 && !existing.po2) existing.po2 = newR.po2;
+  for(const newR of data) {
+    try {
+      const result = await saveRowToDB(newR, batchDate);
+      if(result === 'added') {
+        scanData[batchDate].push({ mawb:newR.mawb, hawb:newR.hawb, supplier:newR.supplier, dest:newR.dest, material:newR.material, po1:newR.po1, po2:newR.po2, qty:newR.qty ? parseInt(newR.qty) : null });
+        added++;
+      } else if(result === 'updated') {
         updated++;
+      } else if(result?.conflict) {
+        conflicts.push(result);
       }
+    } catch(e) {
+      console.error('儲存失敗:', e);
+      showToast('儲存失敗：' + e.message, 'error');
+      return;
     }
-  });
+  }
 
-  // 處理衝突：逐筆提示
+  // 處理衝突
   if(conflicts.length > 0) {
     let msg = `發現 ${conflicts.length} 筆資料與現有記錄不符：\n\n`;
     conflicts.forEach((c,i) => {
@@ -1498,12 +1600,16 @@ function saveData() {
     msg += '確定要以新資料覆蓋嗎？';
     const ok = confirm(msg);
     if(ok) {
-      conflicts.forEach(c => {
-        c.diff.forEach(f => { c.existing[f] = c.newR[f]; });
+      for(const c of conflicts) {
+        await forceUpdateRow(c.id, c.newR);
         updated++;
-      });
+      }
     }
   }
+
+  // 重新載入當天資料
+  const rows = await loadBatchFromDB(batchDate);
+  scanData[batchDate] = rows;
 
   clearPreview();
   showToast(`新增 ${added} 筆，更新 ${updated} 筆`, 'success');
