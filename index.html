@@ -654,6 +654,20 @@
   .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
   .toast.error { border-color: var(--danger); color: var(--danger); }
   .toast.success { border-color: var(--success); color: var(--success); }
+
+  /* 覆蓋 html5-qrcode 預設樣式 */
+  #qr-reader { background: #000 !important; border: none !important; width: 100% !important; }
+  #qr-reader video { width: 100% !important; height: 100% !important; object-fit: cover !important; border-radius: 0 !important; }
+  #qr-reader__scan_region { background: transparent !important; }
+  #qr-reader__scan_region img { display: none !important; }
+  #qr-reader__dashboard { display: none !important; }
+  #qr-reader__status_span { display: none !important; }
+  #qr-reader__header_message { display: none !important; }
+  #qr-reader__filescan_input { display: none !important; }
+  #qr-reader__camera_selection { display: none !important; }
+  #qr-reader__camera_permission_button { display: none !important; }
+  .html5-qrcode-element { display: none !important; }
+  #qr-reader > div:first-child { border: none !important; padding: 0 !important; }
 </style>
 </head>
 <body>
