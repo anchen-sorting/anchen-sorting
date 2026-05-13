@@ -1618,15 +1618,18 @@ function playHAWB(hawb) {
   const nums = hawb.replace(/[^0-9]/g, '');
   if(!nums || !window.speechSynthesis) { playBeep('ok'); return; }
   const last5 = nums.slice(-5);
+  // 英文數字對照，相容性最高
+  const numWords = {'0':'zero','1':'one','2':'two','3':'three','4':'four','5':'five','6':'six','7':'seven','8':'eight','9':'nine'};
+  const text = last5.split('').map(d => numWords[d]||d).join(', ');
   speechSynthesis.cancel();
   setTimeout(() => {
-    const utterance = new SpeechSynthesisUtterance(last5.split('').join(' '));
-    utterance.lang = 'zh-TW';
-    utterance.rate = 0.85;
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = 'en-US';
+    utterance.rate = 0.8;
     utterance.pitch = 1.1;
     utterance.volume = 1.0;
     speechSynthesis.speak(utterance);
-  }, 100);
+  }, 150);
 }
 
 // ════════════════════════════════
