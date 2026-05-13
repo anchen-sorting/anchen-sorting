@@ -891,6 +891,7 @@
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://unpkg.com/@zxing/library@latest/umd/index.min.js"></script>
 <script>
 
 // ════════════════════════════════
@@ -1098,8 +1099,10 @@ async function toggleCamera() {
 }
 
 function stopCamera() {
+  if(zxingReader) { try { zxingReader.reset(); } catch(e){} zxingReader = null; }
   if(cameraStream) { cameraStream.getTracks().forEach(t => t.stop()); cameraStream = null; }
   const video = document.getElementById('cameraFeed');
+  video.srcObject = null;
   video.style.display = 'none';
   document.getElementById('cameraPlaceholder').style.display = 'flex';
   document.getElementById('cameraOverlay').style.display = 'none';
@@ -1196,16 +1199,50 @@ function extractMaterialAndPO(values) {
   return { material, po };
 }
 
+let zxingReader = null;
+
 function startBarcodeScanning() {
+  const video = document.getElementById('cameraFeed');
+  let lastKey = '';
+  let lastScanTime = 0;
+
+  // 優先用 ZXing，fallback 到 BarcodeDetector
+  if(typeof ZXing !== 'undefined') {
+    try {
+      if(zxingReader) { try { zxingReader.reset(); } catch(e){} }
+      zxingReader = new ZXing.BrowserMultiFormatReader();
+      zxingReader.decodeFromVideoDevice(null, 'cameraFeed', (result, err) => {
+        if(!cameraActive) return;
+        if(result) {
+          const now = Date.now();
+          const value = result.getText();
+          if(value !== lastKey || now - lastScanTime > 2000) {
+            lastKey = value;
+            lastScanTime = now;
+            // 先嘗試智慧辨識
+            const { material, po } = extractMaterialAndPO([value]);
+            if(material && po) {
+              updateScanUI(material, po);
+              doSearch(material, po);
+            } else {
+              handleScan(value);
+            }
+          }
+        }
+      });
+      console.log('ZXing 啟動成功');
+      return;
+    } catch(e) {
+      console.log('ZXing 失敗，改用 BarcodeDetector:', e);
+    }
+  }
+
+  // Fallback: BarcodeDetector
   if(!('BarcodeDetector' in window)) {
-    showToast('此瀏覽器不支援自動條碼辨識，請使用手動輸入', 'error');
+    showToast('此裝置不支援條碼掃描，請使用手動輸入', 'error');
     return;
   }
   const detector = new BarcodeDetector({ formats: ['qr_code','code_128','code_39','ean_13','ean_8','upc_a','data_matrix'] });
-  const video = document.getElementById('cameraFeed');
-  let lastKey = "";
-  let lastScanTime = 0;
-
   async function detect() {
     if(!cameraActive) return;
     try {
@@ -1214,16 +1251,14 @@ function startBarcodeScanning() {
         const now = Date.now();
         const values = barcodes.map(b => b.rawValue);
         const key = values.sort().join('|');
-        if(key !== lastKey || now - lastScanTime > 3000) {
+        if(key !== lastKey || now - lastScanTime > 2000) {
           lastKey = key;
           lastScanTime = now;
           const { material, po } = extractMaterialAndPO(values);
           if(material && po) {
-            // 兩個都找到，直接查詢
             updateScanUI(material, po);
             doSearch(material, po);
           } else if(material && !po) {
-            // 只找到料號
             scannedMaterial = material;
             document.getElementById('val-material').textContent = material;
             document.getElementById('val-material').className = 'step-value filled';
