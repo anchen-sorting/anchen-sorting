@@ -1082,9 +1082,36 @@ async function toggleCamera() {
     speechSynthesis.cancel();
   } catch(e) {}
   try {
-    cameraStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment', width: { ideal: 1280 } } });
+    // 嘗試高解析度 + 後鏡頭
+    try {
+      cameraStream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          facingMode: { exact: 'environment' },
+          width: { ideal: 1920, min: 1280 },
+          height: { ideal: 1080, min: 720 },
+        }
+      });
+    } catch(e) {
+      // fallback
+      cameraStream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'environment' }
+      });
+    }
+
     const video = document.getElementById('cameraFeed');
     video.srcObject = cameraStream;
+
+    // 啟用連續自動對焦
+    const track = cameraStream.getVideoTracks()[0];
+    if(track && track.getCapabilities) {
+      try {
+        const cap = track.getCapabilities();
+        if(cap.focusMode && cap.focusMode.includes('continuous')) {
+          await track.applyConstraints({ advanced: [{ focusMode: 'continuous' }] });
+        }
+      } catch(e) {}
+    }
+
     video.style.display = 'block';
     document.getElementById('cameraPlaceholder').style.display = 'none';
     document.getElementById('cameraOverlay').style.display = 'flex';
@@ -1235,7 +1262,20 @@ function startBarcodeScanning() {
   if(typeof ZXing !== 'undefined') {
     try {
       if(zxingReader) { try { zxingReader.reset(); } catch(e){} }
-      zxingReader = new ZXing.BrowserMultiFormatReader();
+      const hints = new Map();
+      const formats = [
+        ZXing.BarcodeFormat.QR_CODE,
+        ZXing.BarcodeFormat.CODE_128,
+        ZXing.BarcodeFormat.CODE_39,
+        ZXing.BarcodeFormat.EAN_13,
+        ZXing.BarcodeFormat.EAN_8,
+        ZXing.BarcodeFormat.UPC_A,
+        ZXing.BarcodeFormat.DATA_MATRIX,
+        ZXing.BarcodeFormat.ITF
+      ];
+      hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, formats);
+      hints.set(ZXing.DecodeHintType.TRY_HARDER, true);
+      zxingReader = new ZXing.BrowserMultiFormatReader(hints, 200); // 200ms 掃描一次
       // 累積最近掃到的所有條碼值（5秒內）
       const recentScans = new Map(); // value -> timestamp
 
@@ -1245,16 +1285,17 @@ function startBarcodeScanning() {
           const now = Date.now();
           const value = result.getText();
           recentScans.set(value, now);
-          // 清掉超過5秒的舊掃描
+          // 清掉超過10秒的舊掃描
           for(const [k, t] of recentScans) {
-            if(now - t > 5000) recentScans.delete(k);
+            if(now - t > 10000) recentScans.delete(k);
           }
 
           if(value !== lastKey || now - lastScanTime > 2000) {
             lastKey = value;
             lastScanTime = now;
-            showToast('掃到：' + value.substring(0, 50), '');
+            showToast('掃到：' + value.substring(0, 40) + (value.length > 40 ? '...' : ''), '');
             console.log('[掃描原始值]', value);
+            console.log('[累積已掃]', Array.from(recentScans.keys()));
 
             // 用最近5秒所有掃到的值一起辨識
             const allValues = Array.from(recentScans.keys());
