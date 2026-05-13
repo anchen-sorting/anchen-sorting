@@ -1616,20 +1616,24 @@ function playBeep(type) {
 
 function playHAWB(hawb) {
   const nums = hawb.replace(/[^0-9]/g, '');
-  if(!nums || !window.speechSynthesis) { playBeep('ok'); return; }
+  // 先播 beep 確保有聲音
+  playBeep('ok');
+  if(!nums || !window.speechSynthesis) return;
   const last5 = nums.slice(-5);
-  // 英文數字對照，相容性最高
   const numWords = {'0':'zero','1':'one','2':'two','3':'three','4':'four','5':'five','6':'six','7':'seven','8':'eight','9':'nine'};
   const text = last5.split('').map(d => numWords[d]||d).join(', ');
+  // beep 播完後再唸數字，避免衝突
   speechSynthesis.cancel();
   setTimeout(() => {
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.lang = 'en-US';
-    utterance.rate = 0.8;
-    utterance.pitch = 1.1;
+    utterance.rate = 0.75;
+    utterance.pitch = 1.0;
     utterance.volume = 1.0;
+    utterance.onstart = () => console.log('speech started');
+    utterance.onerror = (e) => console.log('speech error:', e.error);
     speechSynthesis.speak(utterance);
-  }, 150);
+  }, 400);
 }
 
 // ════════════════════════════════
