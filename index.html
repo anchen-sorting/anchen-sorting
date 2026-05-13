@@ -763,23 +763,7 @@
           <div class="info-cell-value" id="resultPO2">9100052343</div>
         </div>
       </div>
-      <div class="qty-section">
-        <div class="qty-title">到貨進度</div>
-        <div class="qty-bar-wrap">
-          <div class="qty-bar" id="qtyBar" style="width:0%"></div>
-        </div>
-        <div class="qty-numbers">
-          <span class="qty-current">已到 <span id="qtyCurrent">0</span> 箱</span>
-          <span class="qty-total">應到 <span id="qtyTotal">2</span> 箱</span>
-        </div>
-      </div>
-      <div class="qty-input-row" style="margin-bottom:14px">
-        <button class="qty-btn" onclick="adjustQty(-1)">−</button>
-        <input class="qty-input" id="qtyInput" type="number" value="1" min="1">
-        <button class="qty-btn" onclick="adjustQty(1)">＋</button>
-        <button class="btn btn-success btn-sm" onclick="confirmQty()">確認到貨</button>
-      </div>
-      <button class="btn btn-secondary" onclick="resetScan()">重新掃描</button>
+      <button class="btn btn-secondary" onclick="resetScan()" style="margin-top:4px">繼續掃描</button>
     </div>
   </div>
 
@@ -825,22 +809,7 @@
     </div>
   </div>
 
-  <!-- Duplicate warning modal -->
-  <div class="modal-overlay" id="dupModal" onclick="">
-    <div class="modal-sheet">
-      <div style="text-align:center; margin-bottom:16px">
-        <div style="font-size:36px; margin-bottom:8px">⚠️</div>
-        <div style="font-size:15px; font-weight:700; color:var(--warning)">此貼紙剛剛掃描過</div>
-        <div style="font-size:12px; color:var(--text2); margin-top:6px" id="dupTimeMsg"></div>
-      </div>
-      <div style="background:var(--surface2); border-radius:10px; padding:12px; margin-bottom:16px; font-family:var(--mono); font-size:12px; color:var(--text2)">
-        <div>料號：<span id="dupMaterial" style="color:var(--text)"></span></div>
-        <div style="margin-top:4px">訂單號：<span id="dupPO" style="color:var(--text)"></span></div>
-      </div>
-      <button class="btn btn-success" onclick="dupConfirm()" style="margin-bottom:10px">確定，這是不同箱</button>
-      <button class="btn btn-danger" onclick="dupCancel()">取消，這是誤掃</button>
-    </div>
-  </div>
+
 
 </div>
 
@@ -903,15 +872,7 @@
 
 </div>
 
-<!-- ══════════════════════════════════════
-     COMPLETE OVERLAY
-══════════════════════════════════════ -->
-<div class="complete-overlay" id="completeOverlay" onclick="this.classList.remove('show')">
-  <div class="complete-icon">🎉</div>
-  <div class="complete-hawb" id="completeHAWB"></div>
-  <div class="complete-msg">此項目貨物已全數到齊！</div>
-  <button class="btn btn-success btn-sm" style="margin-top:8px">繼續掃描</button>
-</div>
+
 
 <!-- ══════════════════════════════════════
      BATCH MODAL
@@ -1264,7 +1225,7 @@ function doSearch(material, po) {
     playBeep('error');
     if(cameraActive) stopCamera();
   } else if(matches.length === 1) {
-    checkDuplicate(matches[0], () => showResult(matches[0]));
+    showResult(matches[0]);
     if(cameraActive) stopCamera();
   } else {
     showMultiResult(matches);
@@ -1272,46 +1233,7 @@ function doSearch(material, po) {
   }
 }
 
-// ════════════════════════════════
-// 防重複邏輯
-// ════════════════════════════════
-const scanHistory = {}; // key: "material|po", value: timestamp
-let pendingDupCallback = null;
 
-function checkDuplicate(record, callback) {
-  const key = record.material + '|' + record.po1;
-  const now = Date.now();
-  const last = scanHistory[key];
-  if(last) {
-    const diffMs = now - last;
-    const diffSec = Math.floor(diffMs / 1000);
-    const timeStr = diffSec < 60
-      ? diffSec + ' 秒前'
-      : Math.floor(diffSec/60) + ' 分 ' + (diffSec%60) + ' 秒前';
-    document.getElementById('dupMaterial').textContent = record.material;
-    document.getElementById('dupPO').textContent = record.po1 + (record.po2 ? ' / ' + record.po2 : '');
-    document.getElementById('dupTimeMsg').textContent = '上次掃描時間：' + timeStr;
-    pendingDupCallback = callback;
-    document.getElementById('dupModal').classList.add('show');
-    playBeep('warn');
-  } else {
-    scanHistory[key] = now;
-    callback();
-  }
-}
-
-function dupConfirm() {
-  document.getElementById('dupModal').classList.remove('show');
-  const key = scannedMaterial + '|' + scannedPO;
-  scanHistory[key] = Date.now();
-  if(pendingDupCallback) { pendingDupCallback(); pendingDupCallback = null; }
-}
-
-function dupCancel() {
-  document.getElementById('dupModal').classList.remove('show');
-  pendingDupCallback = null;
-  resetScan();
-}
 
 function showResult(record) {
   document.getElementById('resultHAWB').textContent = record.hawb;
@@ -1320,18 +1242,7 @@ function showResult(record) {
   document.getElementById('resultDest').textContent = record.dest;
   document.getElementById('resultMaterial2').textContent = record.material;
   document.getElementById('resultPO2').textContent = record.po1 + (record.po2 ? ' / ' + record.po2 : '');
-
-  const pct = record.qty > 0 ? Math.min(record.confirmed / record.qty * 100, 100) : 0;
-  document.getElementById('qtyCurrent').textContent = record.confirmed;
-  document.getElementById('qtyTotal').textContent = record.qty;
-  document.getElementById('qtyBar').style.width = pct + '%';
-  document.getElementById('qtyBar').className = 'qty-bar' + (record.confirmed >= record.qty ? ' full' : '');
-  document.getElementById('qtyInput').value = 1;
-  document.getElementById('qtyInput').max = record.qty - record.confirmed;
-
   document.getElementById('resultCard').classList.add('show');
-  document.getElementById('resultCard')._record = record;
-
   playHAWB(record.hawb);
 }
 
@@ -1356,44 +1267,7 @@ function showMultiResult(matches) {
   playBeep('warn');
 }
 
-function adjustQty(delta) {
-  const input = document.getElementById('qtyInput');
-  const v = parseInt(input.value) || 1;
-  input.value = Math.max(1, v + delta);
-}
 
-function confirmQty() {
-  const card = document.getElementById('resultCard');
-  const record = card._record;
-  if(!record) return;
-
-  const adding = parseInt(document.getElementById('qtyInput').value) || 1;
-  const newConfirmed = Math.min(record.confirmed + adding, record.qty);
-  record.confirmed = newConfirmed;
-
-  const pct = record.qty > 0 ? Math.min(newConfirmed / record.qty * 100, 100) : 0;
-  document.getElementById('qtyCurrent').textContent = newConfirmed;
-  document.getElementById('qtyBar').style.width = pct + '%';
-  document.getElementById('qtyInput').max = record.qty - newConfirmed;
-
-  if(newConfirmed >= record.qty) {
-    document.getElementById('qtyBar').className = 'qty-bar full';
-    playBeep('complete');
-    showCompleteOverlay(record.hawb);
-  } else {
-    playBeep('ok');
-    showToast(`已確認 ${adding} 箱`, 'success');
-  }
-}
-
-function showCompleteOverlay(hawb) {
-  document.getElementById('completeHAWB').textContent = hawb;
-  document.getElementById('completeOverlay').classList.add('show');
-  setTimeout(() => {
-    document.getElementById('completeOverlay').classList.remove('show');
-    resetScan();
-  }, 3000);
-}
 
 function resetScan() {
   currentStep = 1;
@@ -1563,22 +1437,68 @@ function saveData() {
   const data = window._previewData;
   if(!data) return;
 
-  // 檢查重複小號警示
+  // 檢查重複小號警示（安辰資料有誤的情況）
   const hawbCount = {};
   data.forEach(r => { hawbCount[r.hawb] = (hawbCount[r.hawb]||0) + 1; });
   const dupHawbs = Object.entries(hawbCount).filter(([h,c]) => c > 1).map(([h]) => h);
   if(dupHawbs.length > 0) {
-    const confirmDup = confirm('⚠️ 發現重複小號：\n' + dupHawbs.join(', ') + '\n\n這可能是安辰資料有誤，確定要繼續存入嗎？');
-    if(!confirmDup) return;
+    const ok = confirm('⚠️ 發現重複小號：\n' + dupHawbs.join(', ') + '\n\n這可能是安辰資料有誤，確定要繼續存入嗎？');
+    if(!ok) return;
   }
 
   const batchDate = data[0]?._batchDate || currentBatch;
   if(!scanData[batchDate]) scanData[batchDate] = [];
-  data.forEach(r => {
-    scanData[batchDate].push({ mawb: r.mawb, hawb: r.hawb, supplier: r.supplier, dest: r.dest, material: r.material, po1: r.po1, po2: r.po2, qty: parseInt(r.qty)||1, confirmed: 0 });
+
+  let added = 0, updated = 0, conflicts = [];
+
+  data.forEach(newR => {
+    const key = (newR.material||'').toUpperCase() + '|' + (newR.po1||'').toUpperCase();
+    const existing = scanData[batchDate].find(r =>
+      (r.material||'').toUpperCase() === (newR.material||'').toUpperCase() &&
+      (r.po1||'').toUpperCase() === (newR.po1||'').toUpperCase()
+    );
+
+    if(!existing) {
+      scanData[batchDate].push({ mawb:newR.mawb, hawb:newR.hawb, supplier:newR.supplier, dest:newR.dest, material:newR.material, po1:newR.po1, po2:newR.po2, qty:parseInt(newR.qty)||1 });
+      added++;
+    } else {
+      // 檢查有無衝突欄位
+      const fields = ['mawb','hawb','supplier','dest','qty'];
+      const diff = fields.filter(f => newR[f] && existing[f] && String(newR[f]) !== String(existing[f]));
+      if(diff.length > 0) {
+        conflicts.push({ existing, newR, diff });
+      } else {
+        // 補空白欄位，靜默更新
+        fields.forEach(f => { if(newR[f] && !existing[f]) existing[f] = newR[f]; });
+        if(newR.po2 && !existing.po2) existing.po2 = newR.po2;
+        updated++;
+      }
+    }
   });
+
+  // 處理衝突：逐筆提示
+  if(conflicts.length > 0) {
+    let msg = `發現 ${conflicts.length} 筆資料與現有記錄不符：\n\n`;
+    conflicts.forEach((c,i) => {
+      msg += `【${i+1}】料號：${c.existing.material} / 訂單號：${c.existing.po1}\n`;
+      c.diff.forEach(f => {
+        const labels = {mawb:'主號',hawb:'小號',supplier:'廠商',dest:'目的港',qty:'箱數'};
+        msg += `  ${labels[f]||f}：舊值「${c.existing[f]}」→ 新值「${c.newR[f]}」\n`;
+      });
+      msg += '\n';
+    });
+    msg += '確定要以新資料覆蓋嗎？';
+    const ok = confirm(msg);
+    if(ok) {
+      conflicts.forEach(c => {
+        c.diff.forEach(f => { c.existing[f] = c.newR[f]; });
+        updated++;
+      });
+    }
+  }
+
   clearPreview();
-  showToast(`已存入 ${data.length} 筆資料`, 'success');
+  showToast(`新增 ${added} 筆，更新 ${updated} 筆`, 'success');
   switchTab('scan');
 }
 
@@ -1603,27 +1523,23 @@ function renderProgress(filter) {
   list.innerHTML = '';
 
   Object.values(byHawb).forEach(group => {
-    const totalQty = group.items.reduce((s,r) => s + r.qty, 0);
-    const totalConf = group.items.reduce((s,r) => s + r.confirmed, 0);
-    const status = totalConf === 0 ? 'pending' : totalConf >= totalQty ? 'complete' : 'partial';
+    const hasQty = group.items.every(r => r.qty);
+    const hasMawb = group.items.every(r => r.mawb);
+    const status = (!hasQty || !hasMawb) ? 'partial' : 'complete';
     if(filter !== 'all' && filter !== status) return;
 
     const card = document.createElement('div');
     card.className = 'progress-card';
 
     const badgeClass = { complete: 'badge-complete', partial: 'badge-partial', pending: 'badge-pending' }[status];
-    const badgeText = { complete: '✅ 已到齊', partial: '🔄 進行中', pending: '⏳ 未開始' }[status];
+    const badgeText = { complete: '✅ 資料完整', partial: '⚠️ 資料待補', pending: '⏳ 未開始' }[status];
 
     let itemsHtml = group.items.map(r => {
-      const pct = r.qty > 0 ? Math.min(r.confirmed / r.qty * 100, 100) : 0;
       const poDisplay = r.po1 + (r.po2 ? ' / ' + r.po2 : '');
-      return `<div class="progress-item" style="flex-direction:column; align-items:flex-start; gap:4px; padding:8px 0; border-bottom:1px solid var(--border)">
-        <div style="display:flex; width:100%; align-items:center; gap:8px">
-          <div class="progress-item-code" style="font-size:13px">${r.material}</div>
-          <div class="mini-bar-wrap" style="flex:1"><div class="mini-bar ${r.confirmed>=r.qty?'full':''}" style="width:${pct}%"></div></div>
-          <div class="progress-item-qty">${r.confirmed}/${r.qty}箱</div>
-        </div>
+      return `<div class="progress-item" style="flex-direction:column; align-items:flex-start; gap:3px; padding:8px 0; border-bottom:1px solid var(--border)">
+        <div style="font-family:var(--mono); font-size:13px; color:var(--text)">${r.material}</div>
         <div style="font-size:11px; color:var(--text2); font-family:var(--mono)">訂單號：${poDisplay}</div>
+        ${r.qty ? `<div style="font-size:11px; color:var(--text2)">箱數：${r.qty}</div>` : ''}
       </div>`;
     }).join('');
 
@@ -1693,7 +1609,9 @@ function playBeep(type) {
 function playHAWB(hawb) {
   const nums = hawb.replace(/[^0-9]/g, '');
   if(!nums || !window.speechSynthesis) { playBeep('ok'); return; }
-  const utterance = new SpeechSynthesisUtterance(nums.split('').join(' '));
+  // 只唸後五碼
+  const last5 = nums.slice(-5);
+  const utterance = new SpeechSynthesisUtterance(last5.split('').join(' '));
   utterance.lang = 'zh-TW';
   utterance.rate = 0.9;
   utterance.pitch = 1.1;
