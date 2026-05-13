@@ -1442,36 +1442,43 @@ function parseAnChenExcel(wb) {
     // 找標題列：含「料號」和「訂單號」的那一行
     let headerRow = -1;
     for(let i = 0; i < rows.length; i++) {
-      const row = rows[i].map(c => String(c||''));
-      if(row.some(c => c.includes('料號')) && row.some(c => c.includes('訂單號'))) {
+      const row = (rows[i]||[]).map(c => String(c||''));
+      if(row.some(c => c.includes('料號')) && row.some(c => c.includes('訂單'))) {
         headerRow = i;
         break;
       }
     }
     if(headerRow < 0) return;
 
-    // 找欄位索引
-    const headers = rows[headerRow].map(c => String(c||''));
+    // 找欄位索引（直接按欄位名稱比對）
+    const headers = (rows[headerRow]||[]).map(c => String(c||''));
     let colMawb=-1, colHawb=-1, colSupplier=-1, colDest=-1, colMaterial=-1, colPO1=-1, colPO2=-1, colQty=-1;
     headers.forEach((h, i) => {
-      if(h.includes('主號') || h.includes('MAWB')) colMawb = i;
-      if(h.includes('小號') || h.includes('HAWB')) colHawb = i;
-      if(h.includes('廠商') || h.includes('SHIPPER')) colSupplier = i;
-      if((h.includes('目的港') || h.includes('廠區')) && colDest < 0) colDest = i;
-      if(h.includes('料號') && colMaterial < 0) colMaterial = i;
-      if(h.includes('訂單號1') || (h.includes('訂單號') && !h.includes('2') && colPO1 < 0)) colPO1 = i;
-      if(h.includes('訂單號2')) colPO2 = i;
-      if(h.includes('箱數')) colQty = i;
+      const hh = h.replace(/\s/g,'');
+      if((hh.includes('主號')||hh.includes('MAWB')) && colMawb<0) colMawb = i;
+      if((hh.includes('小號')||hh.includes('HAWB')) && colHawb<0) colHawb = i;
+      if((hh.includes('廠商')||hh.includes('SHIPPER')) && colSupplier<0) colSupplier = i;
+      if((hh.includes('目的港')||hh.includes('廠區')) && colDest<0) colDest = i;
+      if(hh.includes('料號') && colMaterial<0) colMaterial = i;
+      if((hh==='訂單號1'||hh==='訂單號') && colPO1<0) colPO1 = i;
+      if(hh.includes('訂單號2') && colPO2<0) colPO2 = i;
+      if(hh.includes('箱數') && colQty<0) colQty = i;
     });
 
-    // 說明列跳過（標題列+1行）
-    const dataStart = headerRow + 2;
+    console.log('欄位索引:', {colMawb,colHawb,colSupplier,colDest,colMaterial,colPO1,colPO2,colQty});
+
+    // 說明列跳過（標題列下一行是說明，再下一行才是資料）
+    // 判斷：如果標題列+1行的內容像說明文字（很長），就跳過
+    let dataStart = headerRow + 1;
+    const nextRow = rows[dataStart]||[];
+    const nextStr = nextRow.map(c => String(c||'')).join('');
+    if(nextStr.length > 50 && !nextStr.match(/^[0-9]/)) dataStart++;
 
     for(let i = dataStart; i < rows.length; i++) {
-      const row = rows[i];
-      if(!row || row.every(c => !c)) continue;
+      const row = rows[i]||[];
+      if(row.every(c => c===null||c===undefined||String(c).trim()==='')) continue;
 
-      const get = (col) => col >= 0 ? String(row[col]||'').trim() : '';
+      const get = col => col>=0 ? String(row[col]||'').trim() : '';
 
       const mawb     = get(colMawb);
       const hawb     = get(colHawb);
@@ -1485,20 +1492,21 @@ function parseAnChenExcel(wb) {
       if(!material && !po1) continue;
 
       // 從料號提取箱數 (*N)
-      let qty = qtyRaw ? parseInt(qtyRaw) || null : null;
+      let qty = (qtyRaw && qtyRaw !== 'null') ? parseInt(qtyRaw)||null : null;
       const qtyMatch = material.match(/\*(\d+)/);
       if(qtyMatch) {
         if(!qty) qty = parseInt(qtyMatch[1]);
         material = material.replace(/\s*\*\d+/, '').trim();
       }
 
-      // po1 去掉後綴 -XXXXX
-      const po1Clean = po1.replace(/-\d+$/, '').trim();
+      // po1 去掉後綴 -XXXXX（但保留 47- 這種料號格式）
+      const po1Clean = po1.replace(/^(\d{8,})-\d+$/, '$1').trim();
 
       results.push({
-        mawb, hawb, supplier, dest, material, po1: po1Clean, po2, qty,
+        mawb, hawb, supplier, dest, material,
+        po1: po1Clean||po1, po2: (po2==='null'?'':po2), qty,
         _batchDate: batchDate,
-        _warn: !material || !po1Clean || !hawb || !mawb
+        _warn: !material || !po1 || !hawb || !mawb
       });
     }
   });
