@@ -1435,28 +1435,11 @@ function parseAnChenExcel(wb) {
   const results = [];
   wb.SheetNames.forEach(sheetName => {
     const ws = wb.Sheets[sheetName];
-    const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null });
+    const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null, raw: false });
 
-    // Find MAWB
-    let mawb = '';
     let batchDate = currentBatch;
-    for(let i = 0; i < Math.min(10, rows.length); i++) {
-      const row = rows[i];
-      for(let j = 0; j < row.length; j++) {
-        const cell = String(row[j] || '');
-        if(cell.includes('MAWB') || cell.includes('主單號')) {
-          mawb = String(row[j+1] || row[j+2] || '').trim();
-        }
-        if(cell.includes('出貨日期') && row[j+1]) {
-          try {
-            const d = new Date(row[j+1]);
-            if(!isNaN(d)) batchDate = d.toISOString().split('T')[0];
-          } catch(e) {}
-        }
-      }
-    }
 
-    // Find header row
+    // 找標題列：含「料號」和「訂單號」的那一行
     let headerRow = -1;
     for(let i = 0; i < rows.length; i++) {
       const row = rows[i].map(c => String(c||''));
@@ -1467,47 +1450,56 @@ function parseAnChenExcel(wb) {
     }
     if(headerRow < 0) return;
 
-    // Find column indices
+    // 找欄位索引
     const headers = rows[headerRow].map(c => String(c||''));
-    let colSupplier = -1, colDest = -1, colHawb = -1, colMaterial = -1, colPO = -1;
+    let colMawb=-1, colHawb=-1, colSupplier=-1, colDest=-1, colMaterial=-1, colPO1=-1, colPO2=-1, colQty=-1;
     headers.forEach((h, i) => {
-      if(h.includes('SHIPPER') || h.includes('廠商')) colSupplier = i;
-      if((h.includes('目的港') || h.includes('廠區')) && colDest < 0) colDest = i;
+      if(h.includes('主號') || h.includes('MAWB')) colMawb = i;
       if(h.includes('小號') || h.includes('HAWB')) colHawb = i;
-      if(h.includes('料號')) colMaterial = i;
-      if(h.includes('訂單號')) colPO = i;
+      if(h.includes('廠商') || h.includes('SHIPPER')) colSupplier = i;
+      if((h.includes('目的港') || h.includes('廠區')) && colDest < 0) colDest = i;
+      if(h.includes('料號') && colMaterial < 0) colMaterial = i;
+      if(h.includes('訂單號1') || (h.includes('訂單號') && !h.includes('2') && colPO1 < 0)) colPO1 = i;
+      if(h.includes('訂單號2')) colPO2 = i;
+      if(h.includes('箱數')) colQty = i;
     });
 
-    // Parse data rows
-    let lastSupplier = '', lastDest = '', lastHawb = '';
-    for(let i = headerRow + 2; i < rows.length; i++) {
+    // 說明列跳過（標題列+1行）
+    const dataStart = headerRow + 2;
+
+    for(let i = dataStart; i < rows.length; i++) {
       const row = rows[i];
       if(!row || row.every(c => !c)) continue;
 
-      const supplier = String(row[colSupplier] || '').trim() || lastSupplier;
-      const dest = String(row[colDest] || '').trim() || lastDest;
-      const hawb = String(row[colHawb] || '').trim() || lastHawb;
-      const materialRaw = String(row[colMaterial] || '').trim();
-      const poRaw = String(row[colPO] || '').trim();
+      const get = (col) => col >= 0 ? String(row[col]||'').trim() : '';
 
-      if(supplier) lastSupplier = supplier;
-      if(dest) lastDest = dest;
-      if(hawb) lastHawb = hawb;
+      const mawb     = get(colMawb);
+      const hawb     = get(colHawb);
+      const supplier = get(colSupplier);
+      const dest     = get(colDest);
+      let   material = get(colMaterial);
+      let   po1      = get(colPO1);
+      const po2      = get(colPO2);
+      const qtyRaw   = get(colQty);
 
-      if(!materialRaw && !poRaw) continue;
+      if(!material && !po1) continue;
 
-      // Extract qty from material (*N)
-      let material = materialRaw;
-      let qty = 1;
-      const qtyMatch = materialRaw.match(/\*(\d+)/);
-      if(qtyMatch) { qty = parseInt(qtyMatch[1]); material = materialRaw.replace(/\s*\*\d+/, '').trim(); }
+      // 從料號提取箱數 (*N)
+      let qty = qtyRaw ? parseInt(qtyRaw) || null : null;
+      const qtyMatch = material.match(/\*(\d+)/);
+      if(qtyMatch) {
+        if(!qty) qty = parseInt(qtyMatch[1]);
+        material = material.replace(/\s*\*\d+/, '').trim();
+      }
 
-      // Split dual PO
-      const poMatch = poRaw.match(/^([^\(]+?)(?:\s*\(([^\)]+)\))?$/);
-      const po1 = poMatch ? poMatch[1].trim() : poRaw;
-      const po2 = poMatch && poMatch[2] ? poMatch[2].trim() : '';
+      // po1 去掉後綴 -XXXXX
+      const po1Clean = po1.replace(/-\d+$/, '').trim();
 
-      results.push({ mawb, hawb: lastHawb, supplier: lastSupplier, dest: lastDest, material, po1, po2, qty, confirmed: 0, _batchDate: batchDate, _warn: !material || !po1 });
+      results.push({
+        mawb, hawb, supplier, dest, material, po1: po1Clean, po2, qty,
+        _batchDate: batchDate,
+        _warn: !material || !po1Clean || !hawb || !mawb
+      });
     }
   });
   return results;
