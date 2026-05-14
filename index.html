@@ -1107,10 +1107,10 @@ async function toggleCamera() {
     cvRouter = await Dynamsoft.CVR.CaptureVisionRouter.createInstance();
     await cvRouter.setInput(cameraEnhancer);
 
-    // 狀態追蹤：避免同一個值在短時間內重複觸發
+    // 狀態追蹤
     let lastMaterialText = '';
     let lastPOText = '';
-    let searching = false;  // 防止查詢中重複觸發
+    let searching = false;
 
     cvRouter.addResultReceiver({
       onDecodedBarcodesReceived: (result) => {
@@ -1119,13 +1119,12 @@ async function toggleCamera() {
         if(!items || items.length === 0) return;
 
         const now = Date.now();
-        // 更新 recentScans（保留5秒內所有掃到的值）
         items.forEach(item => {
           recentScans.set(item.text, now);
-          console.log('[Dynamsoft掃到]', item.formatString, ':', item.text.substring(0,50));
+          console.log('[Dynamsoft掃到]', item.formatString, ':', item.text.substring(0,60));
         });
-        // 清除超過5秒的舊值
-        for(const [k,t] of recentScans) { if(now - t > 5000) recentScans.delete(k); }
+        // 清除超過8秒的舊值（延長視窗，給換貼紙更多時間）
+        for(const [k,t] of recentScans) { if(now - t > 8000) recentScans.delete(k); }
 
         const allValues = Array.from(recentScans.keys());
         const { material, po } = extractMaterialAndPO(allValues);
@@ -1137,8 +1136,10 @@ async function toggleCamera() {
                       (po ? 'PO✓ ' + po : 'PO等待中');
           showToast(msg, material && po ? 'success' : '');
         }
+
+        // 情況一：同時有料號和訂單號 → 查詢
         if(material && po) {
-          if(material === lastMaterialText && po === lastPOText) return; // 防重複
+          if(material === lastMaterialText && po === lastPOText) return;
           lastMaterialText = material;
           lastPOText = po;
           searching = true;
@@ -1146,8 +1147,8 @@ async function toggleCamera() {
           scannedPO = po;
           updateScanUI(material, po);
           recentScans.clear();
+          stopCamera();          // 先停鏡頭，避免查詢中繼續回調
           doSearch(material, po);
-          stopCamera();
           searching = false;
           return;
         }
@@ -1158,9 +1159,7 @@ async function toggleCamera() {
           scannedPO = '';
           lastMaterialText = material;
           lastPOText = '';
-          // 清除舊值，保留這個料號繼續累積訂單號
-          recentScans.clear();
-          recentScans.set(material, Date.now());
+          // 注意：不清空 recentScans，保留原始QR字串讓後續掃描能組合PO
           document.getElementById('val-material').textContent = material;
           document.getElementById('val-material').className = 'step-value filled';
           document.getElementById('dot1').className = 'step-dot done';
@@ -1168,21 +1167,21 @@ async function toggleCamera() {
           document.getElementById('dot2').className = 'step-dot active';
           document.getElementById('dot2').textContent = '2';
           document.getElementById('val-po').textContent = '等待訂單號...';
-          showToast('料號已識別：' + material, 'success');
+          showToast('料號已識別：' + material + '，請掃條碼', 'success');
           playBeep('ok');
           return;
         }
 
         // 情況三：已有料號，現在掃到訂單號
         if(po && scannedMaterial && po !== scannedPO) {
-          if(po === lastPOText) return; // 防重複
+          if(po === lastPOText) return;
           lastPOText = po;
           searching = true;
           scannedPO = po;
           updateScanUI(scannedMaterial, po);
           recentScans.clear();
-          doSearch(scannedMaterial, po);
           stopCamera();
+          doSearch(scannedMaterial, po);
           searching = false;
           return;
         }
@@ -1214,6 +1213,12 @@ async function toggleCamera() {
     } catch(e) { console.log('鏡頭選擇錯誤:', e); }
 
     await cameraEnhancer.open();
+
+    // 關閉掃描結果的視覺高亮框，防止框鎖定導致切換條碼失敗
+    try {
+      const drawingLayer = cameraView.getDrawingLayer(Dynamsoft.DCE.DrawingLayerId.DBR);
+      if(drawingLayer) drawingLayer.setVisible(false);
+    } catch(e) { console.log('hide layer:', e); }
 
     // 不加去重複過濾器：讓每次掃描都能完整回報，由狀態機自行判斷
     // （MultiFrameResultCrossFilter 會擋住切換條碼後的新掃描）
@@ -1442,7 +1447,6 @@ function doSearch(material, po) {
   hideAllResults();
 
   if(matches.length === 0) {
-    // 分項檢查：料號存在嗎？訂單號存在嗎？
     const matExists = batch.some(r => r.material.replace(/\s*\*\d+$/, '').trim().toUpperCase() === cleanMat);
     const poExists = batch.some(r => {
       const norm = s => String(s||'').trim().toUpperCase();
@@ -1459,7 +1463,7 @@ function doSearch(material, po) {
     document.getElementById('errorPORow').style.borderLeft  = poExists  ? '3px solid var(--success)' : '3px solid var(--danger)';
     document.getElementById('errorCard').classList.add('show');
     playBeep('error');
-    if(cameraActive) stopCamera();
+    // 查無資料：不關鏡頭，讓用戶直接繼續掃下一個（按「繼續掃描」）
   } else if(matches.length === 1) {
     showResult(matches[0]);
     if(cameraActive) stopCamera();
