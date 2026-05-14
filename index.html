@@ -655,21 +655,13 @@
   .toast.error { border-color: var(--danger); color: var(--danger); }
   .toast.success { border-color: var(--success); color: var(--success); }
 
-  /* 覆蓋 html5-qrcode 預設樣式 */
-  #qr-reader { background: #000 !important; border: none !important; width: 100% !important; height: 100% !important; position: relative !important; }
-  #qr-reader * { box-sizing: border-box !important; }
-  #qr-reader video { position: absolute !important; top: 0 !important; left: 0 !important; width: 100% !important; height: 100% !important; object-fit: cover !important; border-radius: 0 !important; }
-  #qr-reader__scan_region { position: absolute !important; top: 0 !important; left: 0 !important; width: 100% !important; height: 100% !important; background: transparent !important; display: flex !important; align-items: center !important; justify-content: center !important; }
-  #qr-reader__scan_region img { display: none !important; }
-  #qr-reader__scan_region canvas { position: absolute !important; top: 50% !important; left: 50% !important; transform: translate(-50%, -50%) !important; }
-  #qr-reader__dashboard { display: none !important; }
-  #qr-reader__status_span { display: none !important; }
-  #qr-reader__header_message { display: none !important; }
-  #qr-reader__filescan_input { display: none !important; }
-  #qr-reader__camera_selection { display: none !important; }
-  #qr-reader__camera_permission_button { display: none !important; }
-  .html5-qrcode-element { display: none !important; }
-  #qr-reader > div:first-child { position: absolute !important; top: 0 !important; left: 0 !important; width: 100% !important; height: 100% !important; border: none !important; padding: 0 !important; margin: 0 !important; }
+  /* Dynamsoft camera 樣式 */
+  #camera-container { background: #000; width: 100%; height: 100%; }
+  #camera-container video { width: 100% !important; height: 100% !important; object-fit: cover !important; }
+  #camera-container canvas { position: absolute !important; top: 0 !important; left: 0 !important; }
+  .dce-sel-camera { display: none !important; }
+  .dce-sel-resolution { display: none !important; }
+  .dce-btn-close { display: none !important; }
 </style>
 </head>
 <body>
@@ -713,8 +705,8 @@
   </div>
 
   <div class="camera-wrap" style="position:relative; background:#000; border-radius:12px; overflow:hidden; aspect-ratio:4/3; margin-bottom:16px; min-height:260px;">
-    <div id="qr-reader" style="position:absolute; top:0; left:0; width:100%; height:100%; border:none !important;"></div>
-    <div class="camera-placeholder" id="cameraPlaceholder" style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;background:var(--surface2);">
+    <div id="camera-container" style="position:absolute; top:0; left:0; width:100%; height:100%;"></div>
+    <div class="camera-placeholder" id="cameraPlaceholder" style="position:absolute;inset:0;z-index:10;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;background:var(--surface2);">
       <div class="camera-icon">📷</div>
       <p style="font-size:13px;color:var(--text2);text-align:center;padding:0 24px;">點擊下方按鈕開啟鏡頭掃描條碼</p>
     </div>
@@ -1110,10 +1102,11 @@ async function toggleCamera() {
     // 建立 CaptureVisionRouter
     cvRouter = await Dynamsoft.CVR.CaptureVisionRouter.createInstance();
 
-    // 建立 CameraEnhancer
-    const cameraEnhancer = await Dynamsoft.DCE.CameraEnhancer.createInstance(
-      document.getElementById('qr-reader')
+    // 建立 CameraEnhancer view
+    const cameraView = await Dynamsoft.DCE.CameraView.createInstance(
+      document.getElementById('camera-container')
     );
+    const cameraEnhancer = await Dynamsoft.DCE.CameraEnhancer.createInstance(cameraView);
     await cvRouter.setInput(cameraEnhancer);
 
     // 監聽掃描結果
