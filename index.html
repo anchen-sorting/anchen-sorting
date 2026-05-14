@@ -899,8 +899,13 @@
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/dynamsoft-barcode-reader-bundle@11.2.4000/dist/dbr.bundle.js"></script>
 <script>
+
+// ════════════════════════════════
+// DYNAMSOFT 初始化
+// ════════════════════════════════
+const DYNAMSOFT_LICENSE = 'DLS2eyJoYW5kc2hha2VDb2RlIjoiMTA1NTczMjgyLU1UQTFOVGN6TWpneUxYZGxZaTFVY21saGJGQnliMm8iLCJtYWluU2VydmVyVVJMIjoiaHR0cHM6Ly9tZGxzLmR5bmFtc29mdG9ubGluZS5jb20vIiwib3JnYW5pemF0aW9uSUQiOiIxMDU1NzMyODIiLCJzdGFuZGJ5U2VydmVyVVJMIjoiaHR0cHM6Ly9zZGxzLmR5bmFtc29mdG9ubGluZS5jb20vIiwiY2hlY2tDb2RlIjotOTA5OTM1ODc5fQ==';
 
 // ════════════════════════════════
 // SUPABASE 初始化
@@ -1078,7 +1083,8 @@ function closeBatchModal() {
 // ════════════════════════════════
 // CAMERA
 // ════════════════════════════════
-let html5QrScanner = null;
+let cvRouter = null;
+let dsScanning = false;
 
 async function toggleCamera() {
   if(cameraActive) { stopCamera(); return; }
@@ -1087,57 +1093,87 @@ async function toggleCamera() {
     speechSynthesis.speak(unlock);
     speechSynthesis.cancel();
   } catch(e) {}
+
   document.getElementById('cameraPlaceholder').style.display = 'none';
   document.getElementById('cameraHint').style.display = 'block';
   document.getElementById('scanBtn').textContent = '關閉鏡頭';
   document.getElementById('scanBtn').className = 'btn btn-secondary';
   cameraActive = true;
+  dsScanning = true;
+
   const recentScans = new Map();
-  const onScanSuccess = (decodedText) => {
-    if(!cameraActive) return;
-    const now = Date.now();
-    recentScans.set(decodedText, now);
-    for(const [k,t] of recentScans) { if(now-t>5000) recentScans.delete(k); }
-    showToast('掃到：' + decodedText.substring(0,50), '');
-    console.log('[掃描]', decodedText);
-    const allValues = Array.from(recentScans.keys());
-    const { material, po } = extractMaterialAndPO(allValues);
-    console.log('[辨識]', { material, po });
-    if(material && po) {
-      updateScanUI(material, po); doSearch(material, po);
-      recentScans.clear(); stopCamera();
-    } else if(material && !scannedMaterial) {
-      scannedMaterial = material;
-      document.getElementById('val-material').textContent = material;
-      document.getElementById('val-material').className = 'step-value filled';
-      document.getElementById('dot1').className = 'step-dot done';
-      document.getElementById('dot1').textContent = '✓';
-      document.getElementById('dot2').className = 'step-dot active';
-      document.getElementById('val-po').textContent = '等待訂單號...';
-      playBeep('ok');
-    } else if(po && scannedMaterial && !scannedPO) {
-      scannedPO = po; updateScanUI(scannedMaterial, po);
-      doSearch(scannedMaterial, po); recentScans.clear(); stopCamera();
-    }
-  };
+
   try {
-    html5QrScanner = new Html5Qrcode('qr-reader');
-    await html5QrScanner.start(
-      { facingMode: 'environment' },
-      { fps: 15, qrbox: { width: 250, height: 250 }, aspectRatio: 1.333,
-        formatsToSupport: [
-          Html5QrcodeSupportedFormats.QR_CODE,
-          Html5QrcodeSupportedFormats.CODE_128,
-          Html5QrcodeSupportedFormats.CODE_39,
-          Html5QrcodeSupportedFormats.DATA_MATRIX,
-          Html5QrcodeSupportedFormats.EAN_13,
-        ]
-      },
-      onScanSuccess, () => {}
+    // 初始化 Dynamsoft License
+    Dynamsoft.License.LicenseManager.initLicense(DYNAMSOFT_LICENSE);
+
+    // 建立 CaptureVisionRouter
+    cvRouter = await Dynamsoft.CVR.CaptureVisionRouter.createInstance();
+
+    // 建立 CameraEnhancer
+    const cameraEnhancer = await Dynamsoft.DCE.CameraEnhancer.createInstance(
+      document.getElementById('qr-reader')
     );
+    await cvRouter.setInput(cameraEnhancer);
+
+    // 監聽掃描結果
+    cvRouter.addResultReceiver({
+      onDecodedBarcodesReceived: (result) => {
+        if(!dsScanning) return;
+        const items = result.barcodesResultItems;
+        if(!items || items.length === 0) return;
+
+        const now = Date.now();
+        items.forEach(item => {
+          const value = item.text;
+          recentScans.set(value, now);
+          console.log('[Dynamsoft掃描]', value);
+        });
+
+        // 清掉超過5秒的舊掃描
+        for(const [k,t] of recentScans) { if(now-t > 5000) recentScans.delete(k); }
+
+        const allValues = Array.from(recentScans.keys());
+        const { material, po } = extractMaterialAndPO(allValues);
+        console.log('[辨識結果]', { material, po });
+
+        if(material || po) {
+          showToast((material||'?') + ' / ' + (po||'等待訂單號...'), '');
+        }
+
+        if(material && po) {
+          updateScanUI(material, po);
+          doSearch(material, po);
+          recentScans.clear();
+          stopCamera();
+        } else if(material && !scannedMaterial) {
+          scannedMaterial = material;
+          document.getElementById('val-material').textContent = material;
+          document.getElementById('val-material').className = 'step-value filled';
+          document.getElementById('dot1').className = 'step-dot done';
+          document.getElementById('dot1').textContent = '✓';
+          document.getElementById('dot2').className = 'step-dot active';
+          document.getElementById('val-po').textContent = '等待訂單號...';
+          playBeep('ok');
+        } else if(po && scannedMaterial && !scannedPO) {
+          scannedPO = po;
+          updateScanUI(scannedMaterial, po);
+          doSearch(scannedMaterial, po);
+          recentScans.clear();
+          stopCamera();
+        }
+      }
+    });
+
+    // 開始掃描（同時掃 QR 和一維條碼）
+    await cameraEnhancer.open();
+    await cvRouter.startCapturing('ReadBarcodes_Balance');
+
   } catch(e) {
+    console.error('Dynamsoft error:', e);
     showToast('無法開啟鏡頭：' + e.message, 'error');
     cameraActive = false;
+    dsScanning = false;
     document.getElementById('cameraPlaceholder').style.display = 'flex';
     document.getElementById('scanBtn').textContent = '開啟鏡頭掃描';
     document.getElementById('scanBtn').className = 'btn btn-primary';
@@ -1145,9 +1181,11 @@ async function toggleCamera() {
 }
 
 async function stopCamera() {
-  if(html5QrScanner) {
-    try { await html5QrScanner.stop(); html5QrScanner.clear(); } catch(e) {}
-    html5QrScanner = null;
+  dsScanning = false;
+  if(cvRouter) {
+    try { await cvRouter.stopCapturing(); } catch(e) {}
+    try { cvRouter.dispose(); } catch(e) {}
+    cvRouter = null;
   }
   document.getElementById('cameraPlaceholder').style.display = 'flex';
   document.getElementById('cameraHint').style.display = 'none';
@@ -1155,7 +1193,6 @@ async function stopCamera() {
   document.getElementById('scanBtn').className = 'btn btn-primary';
   cameraActive = false;
 }
-
 
 // ════════════════════════════════
 // 智慧辨識規則
