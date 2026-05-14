@@ -1147,22 +1147,42 @@ async function toggleCamera() {
       }
     });
 
-    // 隱藏 Dynamsoft 預設 UI 選單
-    const uiElement = cameraView.getUIElement();
-    const selCamera = uiElement.querySelector('.dce-sel-camera');
-    const selRes = uiElement.querySelector('.dce-sel-resolution');
-    if(selCamera) selCamera.style.display = 'none';
-    if(selRes) selRes.style.display = 'none';
-
-    // 選擇後置主鏡頭
+    // 強制選後置主鏡頭（camera 0 facing back）
     try {
       const cameras = await cameraEnhancer.getAllCameras();
-      const backMain = cameras.find(c => c.label && c.label.toLowerCase().includes('back') && !c.label.includes('2') && !c.label.includes('3')) || cameras.find(c => c.facing === 'environment') || cameras[0];
-      if(backMain) await cameraEnhancer.selectCamera(backMain);
+      console.log('可用鏡頭:', cameras.map(c => c.label));
+      // 找 camera 0 facing back 或第一個 back 鏡頭
+      const backCam = cameras.find(c => c.label && c.label.includes('camera 0') && c.label.toLowerCase().includes('back'))
+        || cameras.find(c => c.label && c.label.toLowerCase().includes('back') && c.label.includes('0'))
+        || cameras.find(c => c.label && c.label.toLowerCase().includes('back'))
+        || cameras[0];
+      if(backCam) {
+        await cameraEnhancer.selectCamera(backCam);
+        console.log('選擇鏡頭:', backCam.label);
+      }
     } catch(e) { console.log('camera select error:', e); }
 
     await cameraEnhancer.open();
     await cvRouter.startCapturing('ReadBarcodes_Balance');
+
+    // 開啟後隱藏所有 Dynamsoft UI 元素
+    setTimeout(() => {
+      const uiEl = cameraView.getUIElement();
+      if(!uiEl) return;
+      // 隱藏選單
+      uiEl.querySelectorAll('.dce-sel-camera, .dce-sel-resolution, .dce-btn-close').forEach(el => {
+        el.style.display = 'none';
+      });
+      // 讓 video 填滿容器
+      const video = uiEl.querySelector('video');
+      if(video) {
+        video.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover;';
+      }
+      // 讓容器填滿
+      uiEl.style.cssText = 'width:100%;height:100%;position:absolute;top:0;left:0;overflow:hidden;';
+      const scanArea = uiEl.querySelector('.dce-scanarea');
+      if(scanArea) scanArea.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;';
+    }, 500);
 
   } catch(e) {
     console.error('Dynamsoft error:', e);
