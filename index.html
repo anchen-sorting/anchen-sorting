@@ -656,12 +656,16 @@
   .toast.success { border-color: var(--success); color: var(--success); }
 
   /* Dynamsoft camera 樣式 */
-  #camera-container { background: #000; width: 100%; height: 100%; }
-  #camera-container video { width: 100% !important; height: 100% !important; object-fit: cover !important; }
-  #camera-container canvas { position: absolute !important; top: 0 !important; left: 0 !important; }
+  #camera-container { background: #000; width: 100%; height: 100%; position: absolute; top: 0; left: 0; }
+  #camera-container > div { width: 100% !important; height: 100% !important; }
+  #camera-container video { width: 100% !important; height: 100% !important; object-fit: cover !important; position: absolute !important; top: 0 !important; left: 0 !important; }
+  /* 隱藏 Dynamsoft 預設 UI */
   .dce-sel-camera { display: none !important; }
   .dce-sel-resolution { display: none !important; }
   .dce-btn-close { display: none !important; }
+  .dce-msg-poweredby { opacity: 0.3 !important; font-size: 10px !important; }
+  .dce-scanarea { width: 100% !important; height: 100% !important; }
+  .dce-scanlight { display: none !important; }
 </style>
 </head>
 <body>
@@ -1142,6 +1146,20 @@ async function toggleCamera() {
         }
       }
     });
+
+    // 隱藏 Dynamsoft 預設 UI 選單
+    const uiElement = cameraView.getUIElement();
+    const selCamera = uiElement.querySelector('.dce-sel-camera');
+    const selRes = uiElement.querySelector('.dce-sel-resolution');
+    if(selCamera) selCamera.style.display = 'none';
+    if(selRes) selRes.style.display = 'none';
+
+    // 選擇後置主鏡頭
+    try {
+      const cameras = await cameraEnhancer.getAllCameras();
+      const backMain = cameras.find(c => c.label && c.label.toLowerCase().includes('back') && !c.label.includes('2') && !c.label.includes('3')) || cameras.find(c => c.facing === 'environment') || cameras[0];
+      if(backMain) await cameraEnhancer.selectCamera(backMain);
+    } catch(e) { console.log('camera select error:', e); }
 
     await cameraEnhancer.open();
     await cvRouter.startCapturing('ReadBarcodes_Balance');
