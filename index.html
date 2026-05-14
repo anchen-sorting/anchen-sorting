@@ -1219,14 +1219,29 @@ async function startRouter() {
 
       // 兩個都有 → 查詢
       if(hasM && hasP) {
-        const key = mat + '|' + pov;
-        if(queryTriggered) return; // 同一組不重複觸發
+        if(queryTriggered) return;
         queryTriggered = true;
         scannedMaterial = mat;
         scannedPO = pov;
         scanCache.clear();
-        stopCamera();
+
+        // 查詢並顯示結果，鏡頭繼續開著
         doSearch(mat, pov);
+
+        // 3秒後自動重置UI，準備掃下一個
+        setTimeout(() => {
+          queryTriggered = false;
+          // 重置步驟UI
+          document.getElementById('val-material').textContent = '等待掃描...';
+          document.getElementById('val-material').className = 'step-value';
+          document.getElementById('val-po').textContent = '等待料號完成';
+          document.getElementById('val-po').className = 'step-value';
+          document.getElementById('dot1').className = 'step-dot active';
+          document.getElementById('dot1').textContent = '1';
+          document.getElementById('dot2').className = 'step-dot waiting';
+          document.getElementById('dot2').textContent = '2';
+          showToast('繼續掃描下一個', 'success');
+        }, 3000);
       }
     }
   });
@@ -1462,10 +1477,8 @@ function doSearch(material, po) {
     // 查無資料：不關鏡頭，讓用戶直接繼續掃下一個（按「繼續掃描」）
   } else if(matches.length === 1) {
     showResult(matches[0]);
-    if(cameraActive) stopCamera();
   } else {
     showMultiResult(matches);
-    if(cameraActive) stopCamera();
   }
 }
 
@@ -1521,7 +1534,7 @@ function resetScan() {
   document.getElementById('manualMaterial').value = '';
   document.getElementById('manualPO').value = '';
   hideAllResults();
-  if(!cameraActive) toggleCamera();
+  // 鏡頭持續開著，不需要重開
 }
 
 function hideAllResults() {
