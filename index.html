@@ -1081,11 +1081,7 @@ let cameraView = null;
 
 async function toggleCamera() {
   if(cameraActive) { stopCamera(); return; }
-  try {
-    const unlock = new SpeechSynthesisUtterance('');
-    speechSynthesis.speak(unlock);
-    speechSynthesis.cancel();
-  } catch(e) {}
+  try { const u = new SpeechSynthesisUtterance(''); speechSynthesis.speak(u); speechSynthesis.cancel(); } catch(e) {}
 
   document.getElementById('cameraPlaceholder').style.display = 'none';
   document.getElementById('cameraHint').style.display = 'block';
@@ -1100,7 +1096,6 @@ async function toggleCamera() {
     cameraView = await Dynamsoft.DCE.CameraView.createInstance(document.getElementById('camera-container'));
     cameraEnhancer = await Dynamsoft.DCE.CameraEnhancer.createInstance(cameraView);
 
-    // 設定高解析度
     try { await cameraEnhancer.setResolution({ width: 1920, height: 1080 }); } catch(e) {}
 
     // 鎖定後置主鏡頭
@@ -1110,23 +1105,20 @@ async function toggleCamera() {
         const label = (c.label || '').toLowerCase();
         return label.includes('back') || label.includes('environment') || label.includes('rear');
       });
-      const mainBack = backCams.find(c => (c.label || '').includes('camera 0'))
-        || backCams.find(c => (c.label || '').match(/0[,\s]/))
+      const mainBack = backCams.find(c => (c.label||'').includes('camera 0'))
+        || backCams.find(c => (c.label||'').match(/0[,\s]/))
         || backCams[0] || cameras[0];
       if(mainBack) await cameraEnhancer.selectCamera(mainBack);
     } catch(e) {}
 
     await cameraEnhancer.open();
 
-    // 關閉視覺高亮框
     try {
-      const drawingLayer = cameraView.getDrawingLayer(Dynamsoft.DCE.DrawingLayerId.DBR);
-      if(drawingLayer) drawingLayer.setVisible(false);
+      const dl = cameraView.getDrawingLayer(Dynamsoft.DCE.DrawingLayerId.DBR);
+      if(dl) dl.setVisible(false);
     } catch(e) {}
 
-    // 啟動掃描引擎（第一次）
     await startRouter();
-
     showToast('鏡頭已開啟，對準條碼', 'success');
 
   } catch(e) {
@@ -1139,21 +1131,20 @@ async function toggleCamera() {
   }
 }
 
-// 啟動/重啟掃描引擎（鏡頭不關，只重建router）
-// 每次掃到料號後呼叫，讓引擎保持「第一次開啟」的新鮮狀態
 async function startRouter() {
-  // 先清除舊的router
   if(cvRouter) {
     try { await cvRouter.stopCapturing(); } catch(e) {}
     try { cvRouter.dispose(); } catch(e) {}
     cvRouter = null;
   }
 
-  const recentScans = new Map();
-  scanPhase = 'material'; // 每次重建router都從頭開始
-
   cvRouter = await Dynamsoft.CVR.CaptureVisionRouter.createInstance();
   await cvRouter.setInput(cameraEnhancer);
+
+  // ── 累積快取：不限順序，掃到料號或PO都先存起來 ──
+  // 用時間戳記，每個值有效期10秒，超過自動清除
+  const scanCache = new Map(); // key: 值, value: {type:'material'|'po', time}
+  let queryTriggered = false;  // 防止同一組料號+PO重複觸發
 
   cvRouter.addResultReceiver({
     onDecodedBarcodesReceived: (result) => {
@@ -1162,55 +1153,80 @@ async function startRouter() {
       if(!items || items.length === 0) return;
 
       const now = Date.now();
-      items.forEach(item => {
-        recentScans.set(item.text, now);
-        console.log('[掃到]', item.formatString, ':', item.text.substring(0,60));
-      });
-      for(const [k,t] of recentScans) { if(now - t > 5000) recentScans.delete(k); }
 
-      const allValues = Array.from(recentScans.keys());
-      const { material, po } = extractMaterialAndPO(allValues);
-
-      if(material || po) {
-        const msg = (material ? '料號✓ ' + material.substring(0,15) : '料號等待中') +
-                    ' | ' + (po ? 'PO✓ ' + po : 'PO等待中');
-        showToast(msg, material && po ? 'success' : '');
+      // 清除超過10秒的舊值
+      for(const [k, v] of scanCache) {
+        if(now - v.time > 10000) scanCache.delete(k);
       }
 
-      if(scanPhase === 'material') {
-        if(material && po) {
-          // QR同時含料號和PO（奇景型）→ 直接查詢
-          scanPhase = 'done';
-          scannedMaterial = material;
-          scannedPO = po;
-          updateScanUI(material, po);
-          stopCamera();
-          doSearch(material, po);
-        } else if(material) {
-          // 只有料號 → 重建router（讓引擎回到新鮮狀態），等待PO
-          scanPhase = 'po';
-          scannedMaterial = material;
-          scannedPO = '';
-          document.getElementById('val-material').textContent = material;
-          document.getElementById('val-material').className = 'step-value filled';
-          document.getElementById('dot1').className = 'step-dot done';
-          document.getElementById('dot1').textContent = '✓';
+      // 把每個掃到的值分類存入快取
+      items.forEach(item => {
+        const raw = item.text;
+        console.log('[掃到]', item.formatString, ':', raw.substring(0, 60));
+
+        // 從這個值嘗試解析出料號和PO（可能一個值同時含兩個，如奇景QR）
+        const { material, po } = extractMaterialAndPO([raw]);
+
+        if(material) {
+          scanCache.set('mat:' + material, { type: 'material', value: material, time: now });
+        }
+        if(po) {
+          scanCache.set('po:' + po, { type: 'po', value: po, time: now });
+        }
+        // 若兩者都沒解析到，存原始值等後續組合用
+        if(!material && !po) {
+          scanCache.set('raw:' + raw, { type: 'raw', value: raw, time: now });
+        }
+      });
+
+      // 重新用所有快取值做一次完整解析
+      const allRaws = Array.from(scanCache.values()).map(v => v.value);
+      const { material: mat, po: pov } = extractMaterialAndPO(allRaws);
+
+      // 顯示目前狀態
+      const hasM = !!mat, hasP = !!pov;
+      if(hasM || hasP) {
+        showToast(
+          (hasM ? '料號✓ ' + mat.substring(0,15) : '料號等待中') +
+          ' | ' + (hasP ? 'PO✓ ' + pov : 'PO等待中'),
+          hasM && hasP ? 'success' : ''
+        );
+      }
+
+      // 更新UI顯示
+      if(hasM && document.getElementById('val-material').textContent !== mat) {
+        document.getElementById('val-material').textContent = mat;
+        document.getElementById('val-material').className = 'step-value filled';
+        document.getElementById('dot1').className = 'step-dot done';
+        document.getElementById('dot1').textContent = '✓';
+        if(!hasP) {
           document.getElementById('dot2').className = 'step-dot active';
-          document.getElementById('dot2').textContent = '2';
           document.getElementById('val-po').textContent = '等待訂單號...';
           playBeep('ok');
-          showToast('料號✓ 請對準條碼', 'success');
-          // 重建router，鏡頭不關
-          startRouter();
         }
-      } else if(scanPhase === 'po') {
-        if(po && po !== scannedPO) {
-          scanPhase = 'done';
-          scannedPO = po;
-          updateScanUI(scannedMaterial, po);
-          stopCamera();
-          doSearch(scannedMaterial, po);
+      }
+      if(hasP && document.getElementById('val-po').textContent !== pov) {
+        document.getElementById('val-po').textContent = pov;
+        document.getElementById('val-po').className = 'step-value filled';
+        document.getElementById('dot2').className = 'step-dot done';
+        document.getElementById('dot2').textContent = '✓';
+        if(!hasM) {
+          document.getElementById('dot1').className = 'step-dot active';
+          document.getElementById('val-material').textContent = '等待料號...';
+          playBeep('ok');
         }
+      }
+
+      // 兩個都有 → 查詢
+      if(hasM && hasP) {
+        const key = mat + '|' + pov;
+        if(queryTriggered) return; // 同一組不重複觸發
+        queryTriggered = true;
+        scannedMaterial = mat;
+        scannedPO = pov;
+        scanCache.clear();
+        stopCamera();
+        doSearch(mat, pov);
       }
     }
   });
@@ -1228,10 +1244,9 @@ async function startRouter() {
     await cvRouter.updateSettings('ReadBarcodes_ReadRateFirst', settings);
     await cvRouter.startCapturing('ReadBarcodes_ReadRateFirst');
   } catch(e) {
-    console.log('ReadRateFirst 失敗，改用 Balance:', e);
     try { await cvRouter.startCapturing('ReadBarcodes_Balance'); } catch(e2) {}
   }
-  console.log('[Router] 啟動完成，phase:', scanPhase);
+  console.log('[Router] 啟動，phase:', scanPhase);
 }
 
 async function stopCamera() {
@@ -1506,7 +1521,6 @@ function resetScan() {
   document.getElementById('manualMaterial').value = '';
   document.getElementById('manualPO').value = '';
   hideAllResults();
-  // 自動重開鏡頭，讓操作人員直接繼續掃下一個
   if(!cameraActive) toggleCamera();
 }
 
