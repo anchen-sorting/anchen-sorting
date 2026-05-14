@@ -1107,53 +1107,84 @@ async function toggleCamera() {
     cvRouter = await Dynamsoft.CVR.CaptureVisionRouter.createInstance();
     await cvRouter.setInput(cameraEnhancer);
 
+    // 狀態追蹤：避免同一個值在短時間內重複觸發
+    let lastMaterialText = '';
+    let lastPOText = '';
+    let searching = false;  // 防止查詢中重複觸發
+
     cvRouter.addResultReceiver({
       onDecodedBarcodesReceived: (result) => {
-        if(!cameraActive) return;
+        if(!cameraActive || searching) return;
         const items = result.barcodeResultItems;
-        console.log('[掃描回調] items:', items ? items.length : 'null');
         if(!items || items.length === 0) return;
+
         const now = Date.now();
+        // 更新 recentScans（保留5秒內所有掃到的值）
         items.forEach(item => {
           recentScans.set(item.text, now);
-          console.log('[Dynamsoft掃到]', item.formatString, ':', item.text);
-          showToast('掃到: ' + item.text.substring(0, 40), '');
+          console.log('[Dynamsoft掃到]', item.formatString, ':', item.text.substring(0,50));
         });
-        for(const [k,t] of recentScans) { if(now-t > 5000) recentScans.delete(k); }
+        // 清除超過5秒的舊值
+        for(const [k,t] of recentScans) { if(now - t > 5000) recentScans.delete(k); }
+
         const allValues = Array.from(recentScans.keys());
         const { material, po } = extractMaterialAndPO(allValues);
-        if(material || po) showToast((material?'料號:'+material:'') + (po?' PO:'+po:''), '');
+
+        // 顯示目前識別狀態
+        if(material || po) {
+          const msg = (material ? '料號✓ ' + material.substring(0,15) : '料號等待中') +
+                      ' | ' +
+                      (po ? 'PO✓ ' + po : 'PO等待中');
+          showToast(msg, material && po ? 'success' : '');
+        }
         if(material && po) {
-          // 兩個都有，直接查詢
+          if(material === lastMaterialText && po === lastPOText) return; // 防重複
+          lastMaterialText = material;
+          lastPOText = po;
+          searching = true;
           scannedMaterial = material;
           scannedPO = po;
           updateScanUI(material, po);
-          doSearch(material, po);
           recentScans.clear();
+          doSearch(material, po);
           stopCamera();
-        } else if(material) {
-          if(material !== scannedMaterial) {
-            // 新料號進來，重置狀態重新開始
-            scannedMaterial = material;
-            scannedPO = '';
-            recentScans.clear();
-            recentScans.set(material, Date.now());
-            document.getElementById('val-material').textContent = material;
-            document.getElementById('val-material').className = 'step-value filled';
-            document.getElementById('dot1').className = 'step-dot done';
-            document.getElementById('dot1').textContent = '✓';
-            document.getElementById('dot2').className = 'step-dot waiting';
-            document.getElementById('dot2').textContent = '2';
-            document.getElementById('val-po').textContent = '等待訂單號...';
-            playBeep('ok');
-          }
-          // 繼續掃描等訂單號
-        } else if(po && scannedMaterial && po !== scannedPO) {
+          searching = false;
+          return;
+        }
+
+        // 情況二：只掃到料號（新料號進來）
+        if(material && material !== scannedMaterial) {
+          scannedMaterial = material;
+          scannedPO = '';
+          lastMaterialText = material;
+          lastPOText = '';
+          // 清除舊值，保留這個料號繼續累積訂單號
+          recentScans.clear();
+          recentScans.set(material, Date.now());
+          document.getElementById('val-material').textContent = material;
+          document.getElementById('val-material').className = 'step-value filled';
+          document.getElementById('dot1').className = 'step-dot done';
+          document.getElementById('dot1').textContent = '✓';
+          document.getElementById('dot2').className = 'step-dot active';
+          document.getElementById('dot2').textContent = '2';
+          document.getElementById('val-po').textContent = '等待訂單號...';
+          showToast('料號已識別：' + material, 'success');
+          playBeep('ok');
+          return;
+        }
+
+        // 情況三：已有料號，現在掃到訂單號
+        if(po && scannedMaterial && po !== scannedPO) {
+          if(po === lastPOText) return; // 防重複
+          lastPOText = po;
+          searching = true;
           scannedPO = po;
           updateScanUI(scannedMaterial, po);
-          doSearch(scannedMaterial, po);
           recentScans.clear();
+          doSearch(scannedMaterial, po);
           stopCamera();
+          searching = false;
+          return;
         }
       }
     });
@@ -1184,15 +1215,10 @@ async function toggleCamera() {
 
     await cameraEnhancer.open();
 
-    // 加入多幀驗證過濾器（去重複）
-    try {
-      const filter = new Dynamsoft.Utility.MultiFrameResultCrossFilter();
-      filter.enableResultDeduplication('barcode', true);
-      await cvRouter.addResultFilter(filter);
-    } catch(e) { console.log('filter error:', e); }
+    // 不加去重複過濾器：讓每次掃描都能完整回報，由狀態機自行判斷
+    // （MultiFrameResultCrossFilter 會擋住切換條碼後的新掃描）
 
     // 自訂掃描設定：同時支援 QR 和一維條碼，持續掃描不停止
-    // 用 ReadRateFirst 模式提高一維條碼辨識率
     try {
       const settings = await cvRouter.getSimplifiedSettings('ReadBarcodes_ReadRateFirst');
       settings.barcodeSettings.barcodeFormatIds =
@@ -1202,7 +1228,7 @@ async function toggleCamera() {
         Dynamsoft.DBR.EnumBarcodeFormat.BF_EAN_13 |
         Dynamsoft.DBR.EnumBarcodeFormat.BF_DATA_MATRIX |
         Dynamsoft.DBR.EnumBarcodeFormat.BF_ITF;
-      settings.barcodeSettings.expectedBarcodesCount = 1;
+      settings.barcodeSettings.expectedBarcodesCount = 0;
       await cvRouter.updateSettings('ReadBarcodes_ReadRateFirst', settings);
       await cvRouter.startCapturing('ReadBarcodes_ReadRateFirst');
     } catch(e) {
@@ -1245,110 +1271,106 @@ async function stopCamera() {
 // 智慧辨識規則
 // ════════════════════════════════
 function extractMaterialAndPO(values) {
-  // values: 從條碼掃出的所有原始字串陣列
   let material = null;
   let po = null;
 
-  // 排除規則：日期、重量、序號前綴
+  // ── 排除規則 ──
   const isExcluded = v => {
     if(/^\d{8}$/.test(v) && parseInt(v.substring(0,4)) > 2000) return true; // YYYYMMDD
-    if(/^\d{2}-[A-Z]{3}-\d{4}$/.test(v)) return true; // DD-MMM-YYYY
-    if(/^[27]000\d+/.test(v)) return true; // Packing No
+    if(/^\d{2}-[A-Z]{3}-\d{4}$/.test(v)) return true;
+    if(/^[27]000\d+/.test(v)) return true; // Packing / S/N
     if(/^2PK/.test(v)) return true;
     if(/^(QTY|STP|PCS):/i.test(v)) return true;
     return false;
   };
 
-  // 從 QR code 原始內容解析料號
-  const parseQRMaterial = raw => {
-    // 先找 47-XXXXXXX 格式（不管前後是什麼字）
-    let m = raw.match(/\b(47-\d{7})\b/);
-    if(m) return m[1];
-    // 再找 44XXXXXXXX 格式
-    m = raw.match(/\b(44\d{8})\b/);
-    if(m) return m[1];
-    // SB- 開頭
-    m = raw.match(/\b(SB-[A-Z0-9\-]+)\b/);
-    if(m) return m[1];
-    // 帶標籤的格式
-    const patterns = [
-      /(?:物料[编碼码]|Material[\s_]?[Cc]ode|P\/NO\.?|PN)[:\s]+([A-Za-z0-9\-]+)/i,
+  // ── 從長字串（QR內容）解析料號和PO ──
+  // 奇景型 QR 格式範例：
+  //   "PO : 9100054242\n供應商：...\n物料編碼：4403000362\n..."
+  //   "NOVATEK,9100051194,NT71838QG,1002747,4402000001,20260510"
+  //   "00000G265041449-0003|47-7015323|10712|1002747|20260507|20270507"
+  const parseQR = raw => {
+    let mat = null, p = null;
+
+    // 1. 有明確標籤的優先（不管44衝突）
+    const matTagPatterns = [
+      /(?:物料[编編碼码号號])[：:\s]+([A-Za-z0-9\-]+)/,        // 物料編碼：4403000362
+      /(?:Material[\s_]?[Cc]ode|P\/NO\.?|PN)[:\s]+([A-Za-z0-9\-]+)/i,
       /(?:INVOICE\s*NO\.?|INV#?|IN#?)[:\s#]*([0-9]{5,10})/i,
     ];
-    for(const p of patterns) {
-      const mm = raw.match(p);
-      if(mm) return mm[1].trim();
+    for(const p2 of matTagPatterns) {
+      const mm = raw.match(p2);
+      if(mm) { mat = mm[1].trim(); break; }
     }
-    return null;
-  };
 
-  // 從 QR code 原始內容解析訂單號
-  const parseQRPO = raw => {
-    let m = raw.match(/\b(91\d{8,})\b/);
-    if(m) return m[1].replace(/-.*$/, '');
-    m = raw.match(/\b(44\d{8})\b/);
-    if(m) return m[1];
-    m = raw.match(/(?:PO[\s.:]*N[OoO]?\.?|訂單[號号])[:\s]*([0-9\-]+)/i);
-    if(m) return m[1].replace(/-.*$/, '');
-    return null;
-  };
-
-  // 判斷是否為料號格式（嚴格）
-  const isMaterial = v => {
-    if(/^47-\d{7}$/.test(v)) return true;              // 47-XXXXXXX（7碼）
-    if(/^44\d{8}$/.test(v)) return 'maybe';            // 44XXXXXXXX (10碼)
-    if(/^SB-[A-Za-z0-9\-]+$/.test(v)) return true;
-    if(/^INV#?\s*\d{5,8}$/i.test(v)) return true;
-    return false;
-  };
-
-  // 判斷是否為訂單號格式
-  const isPO = v => {
-    if(/^91\d{8,}/.test(v)) return true;               // 91XXXXXXXX
-    if(/^44\d{8}$/.test(v)) return 'maybe';            // 44XXXXXXXX
-    return false;
-  };
-
-  // 處理每個掃到的值：可能是長 QR 或短條碼
-  for(const v of values) {
-    // 不管長短，都嘗試從中抽取料號和訂單號
-    if(!material) {
-      const mat = parseQRMaterial(v);
-      if(mat) material = mat;
+    const poTagPatterns = [
+      /PO\s*[:：]\s*(9[0-9]{9,})/i,   // PO : 9100054242
+      /PO\s*[:：]\s*(4[0-9]{9})/i,     // PO : 44XXXXXXXX
+      /(?:訂單[號号])[：:\s]*([0-9]{8,})/,
+    ];
+    for(const p2 of poTagPatterns) {
+      const mm = raw.match(p2);
+      if(mm) { p = mm[1].replace(/-.*$/, ''); break; }
     }
-    if(!po) {
-      const p = parseQRPO(v);
-      if(p) po = p;
+
+    // 2. 無標籤但有 47-XXXXXXX 或 91XXXXXXXX → 直接辨識（這兩種不會衝突）
+    if(!mat) {
+      const m47 = raw.match(/\b(47-\d{7})\b/);
+      if(m47) mat = m47[1];
     }
-  }
-
-  // 短值再次掃描（補強）
-  const shorts = values.filter(v => v.length <= 30 && !isExcluded(v));
-
-  if(!po) {
-    for(const v of shorts) {
-      if(/^91\d{8,}/.test(v)) { po = v.replace(/-.*$/, ''); break; }
+    if(!mat) {
+      const mSB = raw.match(/\b(SB-[A-Z0-9\-]+)\b/);
+      if(mSB) mat = mSB[1];
     }
-  }
-
-  if(!material) {
-    for(const v of shorts) {
-      if(isMaterial(v) === true) { material = v; break; }
+    if(!p) {
+      const m91 = raw.match(/\b(91\d{8,})\b/);
+      if(m91) p = m91[1].replace(/-.*$/, '');
     }
-  }
 
-  // 處理 44 開頭衝突：INV 類型料號 → 44開頭是訂單號；47/SB 料號 → 44開頭是料號
-  if(!po) {
-    const fortyFours = shorts.filter(v => /^44\d{8}$/.test(v));
-    if(fortyFours.length > 0) {
-      const isINVMaterial = material && /^(INV|\d{7})/.test(material);
-      if(isINVMaterial) {
-        po = fortyFours[0]; // 44開頭當訂單號
-      } else if(!material) {
-        material = fortyFours[0]; // 44開頭當料號
+    // 3. 逗號分隔或 | 分隔的 QR（聯詠型）
+    //    44開頭值：若同一個QR裡已有91的PO或47的料號，44就是另一種角色
+    //    否則看位置：逗號格式中 44 通常在第5欄(索引4)=料號，第1欄(索引1)=PO(91)
+    if(!mat || !p) {
+      const sep = raw.includes(',') ? ',' : (raw.includes('|') ? '|' : null);
+      if(sep) {
+        const parts = raw.split(sep).map(s => s.trim());
+        for(const part of parts) {
+          if(!mat && /^44\d{8}$/.test(part)) mat = part;
+          if(!p && /^91\d{8,}/.test(part)) { p = part.replace(/-.*$/, ''); }
+        }
       }
     }
+
+    // 4. 若仍有44衝突（mat和po都是44開頭）→ 重新判斷
+    //    規則：有 91 開頭的 PO 時，44 就是料號；沒有時看 QR 標籤
+    if(mat && p && mat === p && /^44\d{8}$/.test(mat)) {
+      // 同一個值不可能同時是料號和PO，清空PO讓外層等條碼
+      p = null;
+    }
+
+    return { mat, p };
+  };
+
+  // ── 主流程 ──
+  for(const v of values) {
+    if(v.length > 15) {
+      // 長字串：是QR內容，嘗試解析
+      const { mat, p: pv } = parseQR(v);
+      if(mat && !material) material = mat;
+      if(pv && !po) po = pv;
+    } else {
+      // 短字串：是單純條碼值
+      if(!po && /^91\d{8,}/.test(v)) po = v.replace(/-.*$/, '');
+      if(!po && /^44\d{8}$/.test(v) && material && !/^44/.test(material)) po = v; // 料號是47/SB時，44是PO
+      if(!material && /^47-\d{7}$/.test(v)) material = v;
+      if(!material && /^SB-[A-Za-z0-9\-]+$/.test(v)) material = v;
+      if(!material && /^INV#?\s*\d{5,8}$/i.test(v)) material = v;
+      if(!material && /^44\d{8}$/.test(v) && !po) material = v; // 尚無料號時，44當料號
+    }
   }
+
+  // 最終防呆：料號和PO不能是同一個值
+  if(material && po && material === po) po = null;
 
   return { material, po };
 }
