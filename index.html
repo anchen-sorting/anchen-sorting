@@ -1008,14 +1008,34 @@ const DEMO_DATA = {
   ]
 };
 
-let currentBatch = "2026-05-11";
+const today = new Date().toLocaleDateString('sv-SE'); // YYYY-MM-DD
+let currentBatch = today;
 let scanData = JSON.parse(JSON.stringify(DEMO_DATA));
 let currentStep = 1;
 let scannedMaterial = "";
 let scannedPO = "";
 let cameraActive = false;
 let cameraStream = null;
-let scanPhase = 'material'; // 給外部resetScan用
+let scanPhase = 'material';
+
+// 頁面載入：自動從Supabase載入最新批次資料
+document.addEventListener('DOMContentLoaded', async () => {
+  document.getElementById('currentBatch').textContent = today;
+  try {
+    const dates = await loadBatchDates();
+    if(dates.length > 0) {
+      // 優先用今天，如果今天沒資料就用最新日期
+      const targetDate = dates.includes(today) ? today : dates[0];
+      currentBatch = targetDate;
+      document.getElementById('currentBatch').textContent = targetDate;
+      const rows = await loadBatchFromDB(targetDate);
+      scanData[targetDate] = rows;
+      if(rows.length > 0) showToast(`已載入 ${targetDate} 共 ${rows.length} 筆`, 'success');
+    }
+  } catch(e) {
+    console.log('初始化載入失敗:', e);
+  }
+});
 
 // ════════════════════════════════
 // TAB SWITCHING
