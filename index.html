@@ -656,15 +656,17 @@
   .toast.success { border-color: var(--success); color: var(--success); }
 
   /* Dynamsoft camera 樣式 */
-  #camera-container { background: #000; width: 100%; height: 100%; position: absolute; top: 0; left: 0; }
-  #camera-container > div { width: 100% !important; height: 100% !important; }
-  #camera-container video { width: 100% !important; height: 100% !important; object-fit: cover !important; position: absolute !important; top: 0 !important; left: 0 !important; }
-  /* 隱藏 Dynamsoft 預設 UI */
+  #camera-container { background: #000; width: 100%; height: 100%; position: absolute !important; top: 0 !important; left: 0 !important; overflow: hidden; }
+  #camera-container * { box-sizing: border-box; }
+  #camera-container video { position: absolute !important; top: 50% !important; left: 50% !important; transform: translate(-50%,-50%) !important; min-width: 100% !important; min-height: 100% !important; width: auto !important; height: auto !important; object-fit: cover !important; }
+  /* 隱藏所有 Dynamsoft UI 控制項 */
+  #camera-container select { display: none !important; }
+  #camera-container button { display: none !important; }
   .dce-sel-camera { display: none !important; }
   .dce-sel-resolution { display: none !important; }
   .dce-btn-close { display: none !important; }
-  .dce-msg-poweredby { opacity: 0.3 !important; font-size: 10px !important; }
-  .dce-scanarea { width: 100% !important; height: 100% !important; }
+  .dce-msg-poweredby { position: absolute !important; bottom: 4px !important; right: 4px !important; opacity: 0.3 !important; font-size: 9px !important; z-index: 10 !important; }
+  .dce-scanarea { position: absolute !important; top: 0 !important; left: 0 !important; width: 100% !important; height: 100% !important; }
   .dce-scanlight { display: none !important; }
 </style>
 </head>
@@ -1147,42 +1149,48 @@ async function toggleCamera() {
       }
     });
 
-    // 強制選後置主鏡頭（camera 0 facing back）
+    // 先開啟鏡頭（Dynamsoft 會自動選後置）
+    await cameraEnhancer.open();
+
+    // 開啟後強制切換到後置主鏡頭
     try {
       const cameras = await cameraEnhancer.getAllCameras();
-      console.log('可用鏡頭:', cameras.map(c => c.label));
-      // 找 camera 0 facing back 或第一個 back 鏡頭
-      const backCam = cameras.find(c => c.label && c.label.includes('camera 0') && c.label.toLowerCase().includes('back'))
-        || cameras.find(c => c.label && c.label.toLowerCase().includes('back') && c.label.includes('0'))
-        || cameras.find(c => c.label && c.label.toLowerCase().includes('back'))
-        || cameras[0];
-      if(backCam) {
-        await cameraEnhancer.selectCamera(backCam);
-        console.log('選擇鏡頭:', backCam.label);
+      console.log('可用鏡頭:', cameras);
+      // 找 facing back 且編號最小的鏡頭
+      const backCams = cameras.filter(c => c.label && c.label.toLowerCase().includes('back'));
+      const mainBack = backCams.find(c => c.label.includes('camera 0'))
+        || backCams.find(c => c.label.includes('0,'))
+        || backCams[0];
+      if(mainBack) {
+        await cameraEnhancer.selectCamera(mainBack);
+        console.log('切換到:', mainBack.label);
       }
-    } catch(e) { console.log('camera select error:', e); }
+    } catch(e) { console.log('鏡頭切換錯誤:', e); }
 
-    await cameraEnhancer.open();
     await cvRouter.startCapturing('ReadBarcodes_Balance');
 
-    // 開啟後隱藏所有 Dynamsoft UI 元素
-    setTimeout(() => {
+    // 隱藏 Dynamsoft 預設 UI，並讓鏡頭填滿
+    const hideUI = () => {
       const uiEl = cameraView.getUIElement();
       if(!uiEl) return;
-      // 隱藏選單
-      uiEl.querySelectorAll('.dce-sel-camera, .dce-sel-resolution, .dce-btn-close').forEach(el => {
-        el.style.display = 'none';
+      // 隱藏選單和按鈕
+      ['select', 'button', '.dce-sel-camera', '.dce-sel-resolution', '.dce-btn-close'].forEach(sel => {
+        uiEl.querySelectorAll(sel).forEach(el => { el.style.display = 'none'; });
       });
-      // 讓 video 填滿容器
-      const video = uiEl.querySelector('video');
-      if(video) {
-        video.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover;';
-      }
-      // 讓容器填滿
-      uiEl.style.cssText = 'width:100%;height:100%;position:absolute;top:0;left:0;overflow:hidden;';
-      const scanArea = uiEl.querySelector('.dce-scanarea');
-      if(scanArea) scanArea.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;';
-    }, 500);
+      // 讓整個 UI 填滿容器
+      uiEl.style.cssText = 'position:absolute!important;top:0!important;left:0!important;width:100%!important;height:100%!important;overflow:hidden!important;';
+      // 讓 video 填滿
+      uiEl.querySelectorAll('video').forEach(v => {
+        v.style.cssText = 'position:absolute!important;top:50%!important;left:50%!important;transform:translate(-50%,-50%)!important;min-width:100%!important;min-height:100%!important;width:auto!important;height:auto!important;object-fit:cover!important;';
+      });
+      // 讓所有子層容器填滿
+      uiEl.querySelectorAll('div').forEach(d => {
+        if(d.style.position === 'absolute' || getComputedStyle(d).position === 'absolute') return;
+        d.style.cssText = 'width:100%!important;height:100%!important;';
+      });
+    };
+    setTimeout(hideUI, 300);
+    setTimeout(hideUI, 1000);
 
   } catch(e) {
     console.error('Dynamsoft error:', e);
