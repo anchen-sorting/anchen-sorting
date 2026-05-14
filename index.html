@@ -1098,18 +1098,35 @@ async function toggleCamera() {
 
     try { await cameraEnhancer.setResolution({ width: 1920, height: 1080 }); } catch(e) {}
 
-    // 鎖定後置主鏡頭
+    // 鎖定後置主鏡頭（Android + iOS 雙重策略）
     try {
+      // 策略一：先嘗試 Dynamsoft 的 selectCamera API（Android 效果好）
       const cameras = await cameraEnhancer.getAllCameras();
+      console.log('可用鏡頭:', cameras.map(c => c.label || c.deviceId));
       const backCams = cameras.filter(c => {
         const label = (c.label || '').toLowerCase();
         return label.includes('back') || label.includes('environment') || label.includes('rear');
       });
       const mainBack = backCams.find(c => (c.label||'').includes('camera 0'))
         || backCams.find(c => (c.label||'').match(/0[,\s]/))
-        || backCams[0] || cameras[0];
-      if(mainBack) await cameraEnhancer.selectCamera(mainBack);
-    } catch(e) {}
+        || backCams[0];
+      if(mainBack) {
+        await cameraEnhancer.selectCamera(mainBack);
+      } else {
+        // 策略二：iOS 上 label 可能為空，改用 videoConstraints 的 facingMode
+        // Dynamsoft 支援透過 ifAlreadyExists 傳入 facingMode
+        await cameraEnhancer.selectCamera({ facingMode: { exact: 'environment' } });
+      }
+    } catch(e) {
+      // 最後手段：直接設定 videoConstraints
+      try {
+        await cameraEnhancer.updateVideoSettings({
+          video: { facingMode: { exact: 'environment' } }
+        });
+      } catch(e2) {
+        console.log('鏡頭選擇錯誤:', e2);
+      }
+    }
 
     await cameraEnhancer.open();
 
