@@ -1124,9 +1124,11 @@ async function toggleCamera() {
         const { material, po } = extractMaterialAndPO(allValues);
         if(material || po) showToast((material?'料號:'+material:'') + (po?' PO:'+po:''), '');
         if(material && po) {
-          updateScanUI(material, po); doSearch(material, po);
-          recentScans.clear(); stopCamera();
-        } else if(material && !scannedMaterial) {
+          updateScanUI(material, po);
+          doSearch(material, po);
+          recentScans.clear();
+          stopCamera();
+        } else if(material && material !== scannedMaterial) {
           scannedMaterial = material;
           document.getElementById('val-material').textContent = material;
           document.getElementById('val-material').className = 'step-value filled';
@@ -1135,9 +1137,13 @@ async function toggleCamera() {
           document.getElementById('dot2').className = 'step-dot active';
           document.getElementById('val-po').textContent = '等待訂單號...';
           playBeep('ok');
-        } else if(po && scannedMaterial && !scannedPO) {
-          scannedPO = po; updateScanUI(scannedMaterial, po);
-          doSearch(scannedMaterial, po); recentScans.clear(); stopCamera();
+          // 不停止掃描，繼續等訂單號
+        } else if(po && scannedMaterial && po !== scannedPO) {
+          scannedPO = po;
+          updateScanUI(scannedMaterial, po);
+          doSearch(scannedMaterial, po);
+          recentScans.clear();
+          stopCamera();
         }
       }
     });
@@ -1175,6 +1181,19 @@ async function toggleCamera() {
       await cvRouter.addResultFilter(filter);
     } catch(e) { console.log('filter error:', e); }
 
+    // 自訂掃描設定：同時支援 QR 和一維條碼，持續掃描不停止
+    try {
+      const settings = await cvRouter.getSimplifiedSettings('ReadBarcodes_Balance');
+      settings.barcodeSettings.barcodeFormatIds =
+        Dynamsoft.DBR.EnumBarcodeFormat.BF_QR_CODE |
+        Dynamsoft.DBR.EnumBarcodeFormat.BF_CODE_128 |
+        Dynamsoft.DBR.EnumBarcodeFormat.BF_CODE_39 |
+        Dynamsoft.DBR.EnumBarcodeFormat.BF_EAN_13 |
+        Dynamsoft.DBR.EnumBarcodeFormat.BF_DATA_MATRIX;
+      settings.barcodeSettings.expectedBarcodesCount = 1;
+      await cvRouter.updateSettings('ReadBarcodes_Balance', settings);
+    } catch(e) { console.log('settings error:', e); }
+
     await cvRouter.startCapturing('ReadBarcodes_Balance');
     console.log('[Dynamsoft] 開始掃描');
     showToast('鏡頭已開啟，對準條碼', 'success');
@@ -1191,23 +1210,18 @@ async function toggleCamera() {
 
 async function stopCamera() {
   cameraActive = false;
-  if(cvRouter) { try { await cvRouter.stopCapturing(); cvRouter.dispose(); } catch(e){} cvRouter = null; }
-  if(cameraEnhancer) { try { await cameraEnhancer.close(); cameraEnhancer.dispose(); } catch(e){} cameraEnhancer = null; }
-  if(cameraView) { try { cameraView.dispose(); } catch(e){} cameraView = null; }
-  // 不清空容器，保留 dce-video-container，只清掉 Dynamsoft 動態插入的其他子元素
+  try { if(cvRouter) { await cvRouter.stopCapturing(); cvRouter.dispose(); cvRouter = null; } } catch(e){}
+  try { if(cameraEnhancer) { await cameraEnhancer.close(); cameraEnhancer.dispose(); cameraEnhancer = null; } } catch(e){}
+  try { if(cameraView) { cameraView.dispose(); cameraView = null; } } catch(e){}
+
+  // 重建乾淨的 dce-video-container，確保下次可以重用
   const container = document.getElementById('camera-container');
-  const videoContainer = container.querySelector('.dce-video-container');
   container.innerHTML = '';
-  if(videoContainer) {
-    videoContainer.innerHTML = '';
-    container.appendChild(videoContainer);
-  } else {
-    // 重新建立 dce-video-container
-    const newDiv = document.createElement('div');
-    newDiv.className = 'dce-video-container';
-    newDiv.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;';
-    container.appendChild(newDiv);
-  }
+  const newDiv = document.createElement('div');
+  newDiv.className = 'dce-video-container';
+  newDiv.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;';
+  container.appendChild(newDiv);
+
   document.getElementById('cameraPlaceholder').style.display = 'flex';
   document.getElementById('cameraHint').style.display = 'none';
   document.getElementById('scanBtn').textContent = '開啟鏡頭掃描';
