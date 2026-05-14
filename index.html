@@ -1015,6 +1015,7 @@ let scannedMaterial = "";
 let scannedPO = "";
 let cameraActive = false;
 let cameraStream = null;
+let scanPhase = 'material'; // 給外部resetScan用
 
 // ════════════════════════════════
 // TAB SWITCHING
@@ -1107,9 +1108,9 @@ async function toggleCamera() {
     cvRouter = await Dynamsoft.CVR.CaptureVisionRouter.createInstance();
     await cvRouter.setInput(cameraEnhancer);
 
-    // 狀態追蹤
-    let lastMaterialText = '';
-    let lastPOText = '';
+    // 掃描階段旗標
+    // phase: 'material' = 等待料號, 'po' = 料號已得到等待PO, 'done' = 查詢中
+    let phase = 'material';
     let searching = false;
 
     cvRouter.addResultReceiver({
@@ -1123,7 +1124,6 @@ async function toggleCamera() {
           recentScans.set(item.text, now);
           console.log('[Dynamsoft掃到]', item.formatString, ':', item.text.substring(0,60));
         });
-        // 清除超過8秒的舊值（延長視窗，給換貼紙更多時間）
         for(const [k,t] of recentScans) { if(now - t > 8000) recentScans.delete(k); }
 
         const allValues = Array.from(recentScans.keys());
@@ -1132,59 +1132,66 @@ async function toggleCamera() {
         // 顯示目前識別狀態
         if(material || po) {
           const msg = (material ? '料號✓ ' + material.substring(0,15) : '料號等待中') +
-                      ' | ' +
-                      (po ? 'PO✓ ' + po : 'PO等待中');
+                      ' | ' + (po ? 'PO✓ ' + po : 'PO等待中');
           showToast(msg, material && po ? 'success' : '');
         }
 
-        // 情況一：同時有料號和訂單號 → 查詢
-        if(material && po) {
-          if(material === lastMaterialText && po === lastPOText) return;
-          lastMaterialText = material;
-          lastPOText = po;
-          searching = true;
-          scannedMaterial = material;
-          scannedPO = po;
-          updateScanUI(material, po);
-          recentScans.clear();
-          stopCamera();          // 先停鏡頭，避免查詢中繼續回調
-          doSearch(material, po);
-          searching = false;
-          return;
-        }
+        if(phase === 'material') {
+          // 階段1：等待料號
+          if(material && po) {
+            // QR裡同時含料號和PO（奇景型）→ 直接查詢
+            phase = 'done';
+            searching = true;
+            scannedMaterial = material;
+            scannedPO = po;
+            updateScanUI(material, po);
+            recentScans.clear();
+            stopCamera();
+            doSearch(material, po);
+            searching = false;
+          } else if(material) {
+            // 只有料號 → 進入等待PO階段
+            // 清空快取，避免舊QR裡的PO在下一幀自動被抓到（避免跳過讓用戶掃條碼）
+            recentScans.clear();
+            scannedMaterial = material;
+            scannedPO = '';
+            phase = 'po';
+            document.getElementById('val-material').textContent = material;
+            document.getElementById('val-material').className = 'step-value filled';
+            document.getElementById('dot1').className = 'step-dot done';
+            document.getElementById('dot1').textContent = '✓';
+            document.getElementById('dot2').className = 'step-dot active';
+            document.getElementById('dot2').textContent = '2';
+            document.getElementById('val-po').textContent = '等待訂單號...';
+            showToast('料號已識別，請掃條碼', 'success');
+            playBeep('ok');
+          }
 
-        // 情況二：只掃到料號（新料號進來）
-        if(material && material !== scannedMaterial) {
-          scannedMaterial = material;
-          scannedPO = '';
-          lastMaterialText = material;
-          lastPOText = '';
-          // 注意：不清空 recentScans，保留原始QR字串讓後續掃描能組合PO
-          document.getElementById('val-material').textContent = material;
-          document.getElementById('val-material').className = 'step-value filled';
-          document.getElementById('dot1').className = 'step-dot done';
-          document.getElementById('dot1').textContent = '✓';
-          document.getElementById('dot2').className = 'step-dot active';
-          document.getElementById('dot2').textContent = '2';
-          document.getElementById('val-po').textContent = '等待訂單號...';
-          showToast('料號已識別：' + material + '，請掃條碼', 'success');
-          playBeep('ok');
-          return;
+        } else if(phase === 'po') {
+          // 階段2：等待PO條碼
+          if(po && po !== scannedPO) {
+            phase = 'done';
+            searching = true;
+            scannedPO = po;
+            updateScanUI(scannedMaterial, po);
+            recentScans.clear();
+            stopCamera();
+            doSearch(scannedMaterial, po);
+            searching = false;
+          }
+          // 若又掃到新料號（換了一張貼紙），重新來過
+          if(material && material !== scannedMaterial) {
+            recentScans.clear();
+            scannedMaterial = material;
+            scannedPO = '';
+            phase = 'po';
+            document.getElementById('val-material').textContent = material;
+            document.getElementById('val-material').className = 'step-value filled';
+            showToast('新料號：' + material + '，請掃條碼', 'success');
+            playBeep('ok');
+          }
         }
-
-        // 情況三：已有料號，現在掃到訂單號
-        if(po && scannedMaterial && po !== scannedPO) {
-          if(po === lastPOText) return;
-          lastPOText = po;
-          searching = true;
-          scannedPO = po;
-          updateScanUI(scannedMaterial, po);
-          recentScans.clear();
-          stopCamera();
-          doSearch(scannedMaterial, po);
-          searching = false;
-          return;
-        }
+        // phase === 'done' 時什麼都不做，stopCamera已被呼叫
       }
     });
 
@@ -1513,6 +1520,7 @@ function resetScan() {
   currentStep = 1;
   scannedMaterial = "";
   scannedPO = "";
+  scanPhase = 'material';
   document.getElementById('val-material').textContent = '等待掃描...';
   document.getElementById('val-material').className = 'step-value';
   document.getElementById('val-po').textContent = '等待料號完成';
@@ -1524,6 +1532,8 @@ function resetScan() {
   document.getElementById('manualMaterial').value = '';
   document.getElementById('manualPO').value = '';
   hideAllResults();
+  // 自動重開鏡頭，讓操作人員直接繼續掃下一個
+  if(!cameraActive) toggleCamera();
 }
 
 function hideAllResults() {
