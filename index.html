@@ -1076,7 +1076,8 @@ function closeBatchModal() {
 // CAMERA
 // ════════════════════════════════
 let cvRouter = null;
-let dsScanning = false;
+let cameraEnhancer = null;
+let cameraView = null;
 
 async function toggleCamera() {
   if(cameraActive) { stopCamera(); return; }
@@ -1091,55 +1092,41 @@ async function toggleCamera() {
   document.getElementById('scanBtn').textContent = '關閉鏡頭';
   document.getElementById('scanBtn').className = 'btn btn-secondary';
   cameraActive = true;
-  dsScanning = true;
 
   const recentScans = new Map();
 
   try {
-    // 初始化 Dynamsoft License
     Dynamsoft.License.LicenseManager.initLicense(DYNAMSOFT_LICENSE);
+    Dynamsoft.Core.CoreModule.loadWasm();
 
-    // 建立 CaptureVisionRouter
-    cvRouter = await Dynamsoft.CVR.CaptureVisionRouter.createInstance();
+    cameraView = await Dynamsoft.DCE.CameraView.createInstance();
+    cameraEnhancer = await Dynamsoft.DCE.CameraEnhancer.createInstance(cameraView);
 
-    // 建立 CameraView 並掛載到容器
     const container = document.getElementById('camera-container');
-    const cameraView = await Dynamsoft.DCE.CameraView.createInstance();
+    container.innerHTML = '';
     container.append(cameraView.getUIElement());
     cameraView.getUIElement().style.cssText = 'width:100%;height:100%;position:absolute;top:0;left:0;';
-    const cameraEnhancer = await Dynamsoft.DCE.CameraEnhancer.createInstance(cameraView);
+
+    cvRouter = await Dynamsoft.CVR.CaptureVisionRouter.createInstance();
     await cvRouter.setInput(cameraEnhancer);
 
-    // 監聽掃描結果
     cvRouter.addResultReceiver({
       onDecodedBarcodesReceived: (result) => {
-        if(!dsScanning) return;
-        const items = result.barcodesResultItems;
+        if(!cameraActive) return;
+        const items = result.barcodeResultItems;
         if(!items || items.length === 0) return;
-
         const now = Date.now();
         items.forEach(item => {
-          const value = item.text;
-          recentScans.set(value, now);
-          console.log('[Dynamsoft掃描]', value);
+          recentScans.set(item.text, now);
+          console.log('[Dynamsoft]', item.text);
         });
-
-        // 清掉超過5秒的舊掃描
         for(const [k,t] of recentScans) { if(now-t > 5000) recentScans.delete(k); }
-
         const allValues = Array.from(recentScans.keys());
         const { material, po } = extractMaterialAndPO(allValues);
-        console.log('[辨識結果]', { material, po });
-
-        if(material || po) {
-          showToast((material||'?') + ' / ' + (po||'等待訂單號...'), '');
-        }
-
+        if(material || po) showToast((material?'料號:'+material:'') + (po?' PO:'+po:''), '');
         if(material && po) {
-          updateScanUI(material, po);
-          doSearch(material, po);
-          recentScans.clear();
-          stopCamera();
+          updateScanUI(material, po); doSearch(material, po);
+          recentScans.clear(); stopCamera();
         } else if(material && !scannedMaterial) {
           scannedMaterial = material;
           document.getElementById('val-material').textContent = material;
@@ -1150,16 +1137,12 @@ async function toggleCamera() {
           document.getElementById('val-po').textContent = '等待訂單號...';
           playBeep('ok');
         } else if(po && scannedMaterial && !scannedPO) {
-          scannedPO = po;
-          updateScanUI(scannedMaterial, po);
-          doSearch(scannedMaterial, po);
-          recentScans.clear();
-          stopCamera();
+          scannedPO = po; updateScanUI(scannedMaterial, po);
+          doSearch(scannedMaterial, po); recentScans.clear(); stopCamera();
         }
       }
     });
 
-    // 開始掃描（同時掃 QR 和一維條碼）
     await cameraEnhancer.open();
     await cvRouter.startCapturing('ReadBarcodes_Balance');
 
@@ -1167,7 +1150,6 @@ async function toggleCamera() {
     console.error('Dynamsoft error:', e);
     showToast('無法開啟鏡頭：' + e.message, 'error');
     cameraActive = false;
-    dsScanning = false;
     document.getElementById('cameraPlaceholder').style.display = 'flex';
     document.getElementById('scanBtn').textContent = '開啟鏡頭掃描';
     document.getElementById('scanBtn').className = 'btn btn-primary';
@@ -1175,20 +1157,17 @@ async function toggleCamera() {
 }
 
 async function stopCamera() {
-  dsScanning = false;
-  if(cvRouter) {
-    try { await cvRouter.stopCapturing(); } catch(e) {}
-    try { cvRouter.dispose(); } catch(e) {}
-    cvRouter = null;
-  }
+  cameraActive = false;
+  if(cvRouter) { try { await cvRouter.stopCapturing(); cvRouter.dispose(); } catch(e){} cvRouter = null; }
+  if(cameraEnhancer) { try { await cameraEnhancer.close(); cameraEnhancer.dispose(); } catch(e){} cameraEnhancer = null; }
+  if(cameraView) { try { cameraView.dispose(); } catch(e){} cameraView = null; }
+  document.getElementById('camera-container').innerHTML = '';
   document.getElementById('cameraPlaceholder').style.display = 'flex';
   document.getElementById('cameraHint').style.display = 'none';
   document.getElementById('scanBtn').textContent = '開啟鏡頭掃描';
   document.getElementById('scanBtn').className = 'btn btn-primary';
-  cameraActive = false;
 }
 
-// ════════════════════════════════
 // 智慧辨識規則
 // ════════════════════════════════
 function extractMaterialAndPO(values) {
