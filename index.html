@@ -1093,161 +1093,40 @@ async function toggleCamera() {
   document.getElementById('scanBtn').className = 'btn btn-secondary';
   cameraActive = true;
 
-  const recentScans = new Map();
-
   try {
     Dynamsoft.License.LicenseManager.initLicense(DYNAMSOFT_LICENSE);
     Dynamsoft.Core.CoreModule.loadWasm();
 
-    // 把指定的容器（含 dce-video-container class 的 div）傳給 CameraView
-    // 這樣 SDK 只會在容器內建立 video 元素，不會插入相機選單和解析度選單
-    const videoContainer = document.querySelector('#camera-container .dce-video-container');
     cameraView = await Dynamsoft.DCE.CameraView.createInstance(document.getElementById('camera-container'));
     cameraEnhancer = await Dynamsoft.DCE.CameraEnhancer.createInstance(cameraView);
 
-    cvRouter = await Dynamsoft.CVR.CaptureVisionRouter.createInstance();
-    await cvRouter.setInput(cameraEnhancer);
-
-    // 掃描階段旗標
-    // phase: 'material' = 等待料號, 'po' = 料號已得到等待PO, 'done' = 查詢中
-    let phase = 'material';
-    let searching = false;
-
-    cvRouter.addResultReceiver({
-      onDecodedBarcodesReceived: (result) => {
-        if(!cameraActive || searching) return;
-        const items = result.barcodeResultItems;
-        if(!items || items.length === 0) return;
-
-        const now = Date.now();
-        items.forEach(item => {
-          recentScans.set(item.text, now);
-          console.log('[Dynamsoft掃到]', item.formatString, ':', item.text.substring(0,60));
-        });
-        for(const [k,t] of recentScans) { if(now - t > 8000) recentScans.delete(k); }
-
-        const allValues = Array.from(recentScans.keys());
-        const { material, po } = extractMaterialAndPO(allValues);
-
-        // 顯示目前識別狀態
-        if(material || po) {
-          const msg = (material ? '料號✓ ' + material.substring(0,15) : '料號等待中') +
-                      ' | ' + (po ? 'PO✓ ' + po : 'PO等待中');
-          showToast(msg, material && po ? 'success' : '');
-        }
-
-        if(phase === 'material') {
-          // 階段1：等待料號
-          if(material && po) {
-            // QR裡同時含料號和PO（奇景型）→ 直接查詢
-            phase = 'done';
-            searching = true;
-            scannedMaterial = material;
-            scannedPO = po;
-            updateScanUI(material, po);
-            recentScans.clear();
-            stopCamera();
-            doSearch(material, po);
-            searching = false;
-          } else if(material) {
-            // 只有料號 → 進入等待PO階段
-            // 清空快取，避免舊QR裡的PO在下一幀自動被抓到（避免跳過讓用戶掃條碼）
-            recentScans.clear();
-            scannedMaterial = material;
-            scannedPO = '';
-            phase = 'po';
-            document.getElementById('val-material').textContent = material;
-            document.getElementById('val-material').className = 'step-value filled';
-            document.getElementById('dot1').className = 'step-dot done';
-            document.getElementById('dot1').textContent = '✓';
-            document.getElementById('dot2').className = 'step-dot active';
-            document.getElementById('dot2').textContent = '2';
-            document.getElementById('val-po').textContent = '等待訂單號...';
-            showToast('料號已識別，請掃條碼', 'success');
-            playBeep('ok');
-          }
-
-        } else if(phase === 'po') {
-          // 階段2：等待PO條碼
-          if(po && po !== scannedPO) {
-            phase = 'done';
-            searching = true;
-            scannedPO = po;
-            updateScanUI(scannedMaterial, po);
-            recentScans.clear();
-            stopCamera();
-            doSearch(scannedMaterial, po);
-            searching = false;
-          }
-          // 若又掃到新料號（換了一張貼紙），重新來過
-          if(material && material !== scannedMaterial) {
-            recentScans.clear();
-            scannedMaterial = material;
-            scannedPO = '';
-            phase = 'po';
-            document.getElementById('val-material').textContent = material;
-            document.getElementById('val-material').className = 'step-value filled';
-            showToast('新料號：' + material + '，請掃條碼', 'success');
-            playBeep('ok');
-          }
-        }
-        // phase === 'done' 時什麼都不做，stopCamera已被呼叫
-      }
-    });
-
     // 設定高解析度
-    try {
-      await cameraEnhancer.setResolution({ width: 1920, height: 1080 });
-    } catch(e) { console.log('解析度設定錯誤:', e); }
+    try { await cameraEnhancer.setResolution({ width: 1920, height: 1080 }); } catch(e) {}
 
     // 鎖定後置主鏡頭
     try {
       const cameras = await cameraEnhancer.getAllCameras();
-      console.log('可用鏡頭:', cameras.map(c => c.label || c.deviceId));
-      // 優先找 camera 0 facing back
       const backCams = cameras.filter(c => {
         const label = (c.label || '').toLowerCase();
         return label.includes('back') || label.includes('environment') || label.includes('rear');
       });
       const mainBack = backCams.find(c => (c.label || '').includes('camera 0'))
         || backCams.find(c => (c.label || '').match(/0[,\s]/))
-        || backCams[0]
-        || cameras[0];
-      if(mainBack) {
-        await cameraEnhancer.selectCamera(mainBack);
-        console.log('使用鏡頭:', mainBack.label || mainBack.deviceId);
-      }
-    } catch(e) { console.log('鏡頭選擇錯誤:', e); }
+        || backCams[0] || cameras[0];
+      if(mainBack) await cameraEnhancer.selectCamera(mainBack);
+    } catch(e) {}
 
     await cameraEnhancer.open();
 
-    // 關閉掃描結果的視覺高亮框，防止框鎖定導致切換條碼失敗
+    // 關閉視覺高亮框
     try {
       const drawingLayer = cameraView.getDrawingLayer(Dynamsoft.DCE.DrawingLayerId.DBR);
       if(drawingLayer) drawingLayer.setVisible(false);
-    } catch(e) { console.log('hide layer:', e); }
+    } catch(e) {}
 
-    // 不加去重複過濾器：讓每次掃描都能完整回報，由狀態機自行判斷
-    // （MultiFrameResultCrossFilter 會擋住切換條碼後的新掃描）
+    // 啟動掃描引擎（第一次）
+    await startRouter();
 
-    // 自訂掃描設定：同時支援 QR 和一維條碼，持續掃描不停止
-    try {
-      const settings = await cvRouter.getSimplifiedSettings('ReadBarcodes_ReadRateFirst');
-      settings.barcodeSettings.barcodeFormatIds =
-        Dynamsoft.DBR.EnumBarcodeFormat.BF_QR_CODE |
-        Dynamsoft.DBR.EnumBarcodeFormat.BF_CODE_128 |
-        Dynamsoft.DBR.EnumBarcodeFormat.BF_CODE_39 |
-        Dynamsoft.DBR.EnumBarcodeFormat.BF_EAN_13 |
-        Dynamsoft.DBR.EnumBarcodeFormat.BF_DATA_MATRIX |
-        Dynamsoft.DBR.EnumBarcodeFormat.BF_ITF;
-      settings.barcodeSettings.expectedBarcodesCount = 0;
-      await cvRouter.updateSettings('ReadBarcodes_ReadRateFirst', settings);
-      await cvRouter.startCapturing('ReadBarcodes_ReadRateFirst');
-    } catch(e) {
-      console.log('ReadRateFirst 失敗，改用 Balance:', e);
-      await cvRouter.startCapturing('ReadBarcodes_Balance');
-    }
-    console.log('[Dynamsoft] 開始掃描');
     showToast('鏡頭已開啟，對準條碼', 'success');
 
   } catch(e) {
@@ -1258,6 +1137,101 @@ async function toggleCamera() {
     document.getElementById('scanBtn').textContent = '開啟鏡頭掃描';
     document.getElementById('scanBtn').className = 'btn btn-primary';
   }
+}
+
+// 啟動/重啟掃描引擎（鏡頭不關，只重建router）
+// 每次掃到料號後呼叫，讓引擎保持「第一次開啟」的新鮮狀態
+async function startRouter() {
+  // 先清除舊的router
+  if(cvRouter) {
+    try { await cvRouter.stopCapturing(); } catch(e) {}
+    try { cvRouter.dispose(); } catch(e) {}
+    cvRouter = null;
+  }
+
+  const recentScans = new Map();
+  scanPhase = 'material'; // 每次重建router都從頭開始
+
+  cvRouter = await Dynamsoft.CVR.CaptureVisionRouter.createInstance();
+  await cvRouter.setInput(cameraEnhancer);
+
+  cvRouter.addResultReceiver({
+    onDecodedBarcodesReceived: (result) => {
+      if(!cameraActive) return;
+      const items = result.barcodeResultItems;
+      if(!items || items.length === 0) return;
+
+      const now = Date.now();
+      items.forEach(item => {
+        recentScans.set(item.text, now);
+        console.log('[掃到]', item.formatString, ':', item.text.substring(0,60));
+      });
+      for(const [k,t] of recentScans) { if(now - t > 5000) recentScans.delete(k); }
+
+      const allValues = Array.from(recentScans.keys());
+      const { material, po } = extractMaterialAndPO(allValues);
+
+      if(material || po) {
+        const msg = (material ? '料號✓ ' + material.substring(0,15) : '料號等待中') +
+                    ' | ' + (po ? 'PO✓ ' + po : 'PO等待中');
+        showToast(msg, material && po ? 'success' : '');
+      }
+
+      if(scanPhase === 'material') {
+        if(material && po) {
+          // QR同時含料號和PO（奇景型）→ 直接查詢
+          scanPhase = 'done';
+          scannedMaterial = material;
+          scannedPO = po;
+          updateScanUI(material, po);
+          stopCamera();
+          doSearch(material, po);
+        } else if(material) {
+          // 只有料號 → 重建router（讓引擎回到新鮮狀態），等待PO
+          scanPhase = 'po';
+          scannedMaterial = material;
+          scannedPO = '';
+          document.getElementById('val-material').textContent = material;
+          document.getElementById('val-material').className = 'step-value filled';
+          document.getElementById('dot1').className = 'step-dot done';
+          document.getElementById('dot1').textContent = '✓';
+          document.getElementById('dot2').className = 'step-dot active';
+          document.getElementById('dot2').textContent = '2';
+          document.getElementById('val-po').textContent = '等待訂單號...';
+          playBeep('ok');
+          showToast('料號✓ 請對準條碼', 'success');
+          // 重建router，鏡頭不關
+          startRouter();
+        }
+      } else if(scanPhase === 'po') {
+        if(po && po !== scannedPO) {
+          scanPhase = 'done';
+          scannedPO = po;
+          updateScanUI(scannedMaterial, po);
+          stopCamera();
+          doSearch(scannedMaterial, po);
+        }
+      }
+    }
+  });
+
+  try {
+    const settings = await cvRouter.getSimplifiedSettings('ReadBarcodes_ReadRateFirst');
+    settings.barcodeSettings.barcodeFormatIds =
+      Dynamsoft.DBR.EnumBarcodeFormat.BF_QR_CODE |
+      Dynamsoft.DBR.EnumBarcodeFormat.BF_CODE_128 |
+      Dynamsoft.DBR.EnumBarcodeFormat.BF_CODE_39 |
+      Dynamsoft.DBR.EnumBarcodeFormat.BF_EAN_13 |
+      Dynamsoft.DBR.EnumBarcodeFormat.BF_DATA_MATRIX |
+      Dynamsoft.DBR.EnumBarcodeFormat.BF_ITF;
+    settings.barcodeSettings.expectedBarcodesCount = 0;
+    await cvRouter.updateSettings('ReadBarcodes_ReadRateFirst', settings);
+    await cvRouter.startCapturing('ReadBarcodes_ReadRateFirst');
+  } catch(e) {
+    console.log('ReadRateFirst 失敗，改用 Balance:', e);
+    try { await cvRouter.startCapturing('ReadBarcodes_Balance'); } catch(e2) {}
+  }
+  console.log('[Router] 啟動完成，phase:', scanPhase);
 }
 
 async function stopCamera() {
