@@ -656,18 +656,9 @@
   .toast.success { border-color: var(--success); color: var(--success); }
 
   /* Dynamsoft camera 樣式 */
-  #camera-container { background: #000; width: 100%; height: 100%; position: absolute !important; top: 0 !important; left: 0 !important; overflow: hidden; }
-  #camera-container * { box-sizing: border-box; }
-  #camera-container video { position: absolute !important; top: 50% !important; left: 50% !important; transform: translate(-50%,-50%) !important; min-width: 100% !important; min-height: 100% !important; width: auto !important; height: auto !important; object-fit: cover !important; }
-  /* 隱藏所有 Dynamsoft UI 控制項 */
-  #camera-container select { display: none !important; }
-  #camera-container button { display: none !important; }
-  .dce-sel-camera { display: none !important; }
-  .dce-sel-resolution { display: none !important; }
-  .dce-btn-close { display: none !important; }
-  .dce-msg-poweredby { position: absolute !important; bottom: 4px !important; right: 4px !important; opacity: 0.3 !important; font-size: 9px !important; z-index: 10 !important; }
-  .dce-scanarea { position: absolute !important; top: 0 !important; left: 0 !important; width: 100% !important; height: 100% !important; }
-  .dce-scanlight { display: none !important; }
+  #camera-container { background: #000; overflow: hidden; }
+  .dce-video-container { background: #000; }
+  .dce-video-container video { width: 100% !important; height: 100% !important; object-fit: cover !important; }
 </style>
 </head>
 <body>
@@ -711,7 +702,9 @@
   </div>
 
   <div class="camera-wrap" style="position:relative; background:#000; border-radius:12px; overflow:hidden; aspect-ratio:4/3; margin-bottom:16px; min-height:260px;">
-    <div id="camera-container" style="position:absolute; top:0; left:0; width:100%; height:100%;"></div>
+    <div id="camera-container" style="position:absolute; top:0; left:0; width:100%; height:100%;">
+      <div class="dce-video-container" style="position:absolute; top:0; left:0; width:100%; height:100%;"></div>
+    </div>
     <div class="camera-placeholder" id="cameraPlaceholder" style="position:absolute;inset:0;z-index:10;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;background:var(--surface2);">
       <div class="camera-icon">📷</div>
       <p style="font-size:13px;color:var(--text2);text-align:center;padding:0 24px;">點擊下方按鈕開啟鏡頭掃描條碼</p>
@@ -1105,13 +1098,11 @@ async function toggleCamera() {
     Dynamsoft.License.LicenseManager.initLicense(DYNAMSOFT_LICENSE);
     Dynamsoft.Core.CoreModule.loadWasm();
 
-    cameraView = await Dynamsoft.DCE.CameraView.createInstance();
+    // 把指定的容器（含 dce-video-container class 的 div）傳給 CameraView
+    // 這樣 SDK 只會在容器內建立 video 元素，不會插入相機選單和解析度選單
+    const videoContainer = document.querySelector('#camera-container .dce-video-container');
+    cameraView = await Dynamsoft.DCE.CameraView.createInstance(document.getElementById('camera-container'));
     cameraEnhancer = await Dynamsoft.DCE.CameraEnhancer.createInstance(cameraView);
-
-    const container = document.getElementById('camera-container');
-    container.innerHTML = '';
-    container.append(cameraView.getUIElement());
-    cameraView.getUIElement().style.cssText = 'width:100%;height:100%;position:absolute;top:0;left:0;';
 
     cvRouter = await Dynamsoft.CVR.CaptureVisionRouter.createInstance();
     await cvRouter.setInput(cameraEnhancer);
@@ -1149,48 +1140,32 @@ async function toggleCamera() {
       }
     });
 
-    // 先開啟鏡頭（Dynamsoft 會自動選後置）
-    await cameraEnhancer.open();
+    // 設定高解析度
+    try {
+      await cameraEnhancer.setResolution({ width: 1920, height: 1080 });
+    } catch(e) { console.log('解析度設定錯誤:', e); }
 
-    // 開啟後強制切換到後置主鏡頭
+    // 鎖定後置主鏡頭
     try {
       const cameras = await cameraEnhancer.getAllCameras();
-      console.log('可用鏡頭:', cameras);
-      // 找 facing back 且編號最小的鏡頭
-      const backCams = cameras.filter(c => c.label && c.label.toLowerCase().includes('back'));
-      const mainBack = backCams.find(c => c.label.includes('camera 0'))
-        || backCams.find(c => c.label.includes('0,'))
-        || backCams[0];
+      console.log('可用鏡頭:', cameras.map(c => c.label || c.deviceId));
+      // 優先找 camera 0 facing back
+      const backCams = cameras.filter(c => {
+        const label = (c.label || '').toLowerCase();
+        return label.includes('back') || label.includes('environment') || label.includes('rear');
+      });
+      const mainBack = backCams.find(c => (c.label || '').includes('camera 0'))
+        || backCams.find(c => (c.label || '').match(/0[,\s]/))
+        || backCams[0]
+        || cameras[0];
       if(mainBack) {
         await cameraEnhancer.selectCamera(mainBack);
-        console.log('切換到:', mainBack.label);
+        console.log('使用鏡頭:', mainBack.label || mainBack.deviceId);
       }
-    } catch(e) { console.log('鏡頭切換錯誤:', e); }
+    } catch(e) { console.log('鏡頭選擇錯誤:', e); }
 
+    await cameraEnhancer.open();
     await cvRouter.startCapturing('ReadBarcodes_Balance');
-
-    // 隱藏 Dynamsoft 預設 UI，並讓鏡頭填滿
-    const hideUI = () => {
-      const uiEl = cameraView.getUIElement();
-      if(!uiEl) return;
-      // 隱藏選單和按鈕
-      ['select', 'button', '.dce-sel-camera', '.dce-sel-resolution', '.dce-btn-close'].forEach(sel => {
-        uiEl.querySelectorAll(sel).forEach(el => { el.style.display = 'none'; });
-      });
-      // 讓整個 UI 填滿容器
-      uiEl.style.cssText = 'position:absolute!important;top:0!important;left:0!important;width:100%!important;height:100%!important;overflow:hidden!important;';
-      // 讓 video 填滿
-      uiEl.querySelectorAll('video').forEach(v => {
-        v.style.cssText = 'position:absolute!important;top:50%!important;left:50%!important;transform:translate(-50%,-50%)!important;min-width:100%!important;min-height:100%!important;width:auto!important;height:auto!important;object-fit:cover!important;';
-      });
-      // 讓所有子層容器填滿
-      uiEl.querySelectorAll('div').forEach(d => {
-        if(d.style.position === 'absolute' || getComputedStyle(d).position === 'absolute') return;
-        d.style.cssText = 'width:100%!important;height:100%!important;';
-      });
-    };
-    setTimeout(hideUI, 300);
-    setTimeout(hideUI, 1000);
 
   } catch(e) {
     console.error('Dynamsoft error:', e);
