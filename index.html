@@ -950,13 +950,14 @@ async function saveRowToDB(row, batchDate) {
     qty: row.qty ? parseInt(row.qty) : null,
     updated_at: new Date().toISOString()
   };
-  // 先查是否已存在
+
+  // 用 hawb + material + po1 查是否已存在（全域唯一，不限批次日期）
   const { data: existing } = await sb
     .from('sorting_data')
-    .select('id, mawb, hawb, supplier, dest, qty')
-    .eq('batch_date', batchDate)
+    .select('id, mawb, hawb, supplier, dest, qty, material, po1, batch_date')
     .eq('material', row.material)
     .eq('po1', row.po1)
+    .eq('hawb', row.hawb)
     .maybeSingle();
 
   if(!existing) {
