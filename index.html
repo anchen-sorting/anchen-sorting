@@ -965,14 +965,23 @@ async function saveRowToDB(row, batchDate) {
     if(error) throw error;
     return 'added';
   } else {
-    // 找出衝突欄位
-    const fields = ['mawb','hawb','supplier','dest','qty'];
+    // 找出衝突欄位（排除 qty，qty 用累加不用比對）
+    const fields = ['mawb','hawb','supplier','dest'];
     const diff = fields.filter(f => payload[f] && existing[f] && String(payload[f]) !== String(existing[f]));
     if(diff.length > 0) return { conflict: true, existing, newR: payload, diff, id: existing.id };
-    // 補空白欄位
+
+    // 相同料號+訂單號+小號 → 箱數累加，不覆蓋
     const update = {};
     fields.forEach(f => { if(payload[f] && !existing[f]) update[f] = payload[f]; });
     if(row.po2 && !existing.po2) update.po2 = row.po2;
+
+    // 箱數累加邏輯
+    const oldQty = parseInt(existing.qty) || 0;
+    const newQty = parseInt(payload.qty) || 0;
+    if(newQty > 0) {
+      update.qty = oldQty + newQty;  // 累加而非覆蓋
+    }
+
     if(Object.keys(update).length > 0) {
       update.updated_at = new Date().toISOString();
       await sb.from('sorting_data').update(update).eq('id', existing.id);
@@ -1260,10 +1269,9 @@ async function startRouter() {
         // 查詢並顯示結果，鏡頭繼續開著
         doSearch(mat, pov);
 
-        // 3秒後自動重置UI，準備掃下一個
+        // 1秒後自動重置UI，準備掃下一個
         setTimeout(() => {
           queryTriggered = false;
-          // 重置步驟UI
           document.getElementById('val-material').textContent = '等待掃描...';
           document.getElementById('val-material').className = 'step-value';
           document.getElementById('val-po').textContent = '等待料號完成';
@@ -1273,7 +1281,7 @@ async function startRouter() {
           document.getElementById('dot2').className = 'step-dot waiting';
           document.getElementById('dot2').textContent = '2';
           showToast('繼續掃描下一個', 'success');
-        }, 3000);
+        }, 1000);
       }
     }
   });
