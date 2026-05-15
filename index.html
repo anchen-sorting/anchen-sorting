@@ -817,6 +817,12 @@
 ══════════════════════════════════════ -->
 <div class="page" id="page-upload">
 
+  <div style="display:flex; align-items:center; gap:12px; margin-bottom:16px; padding:12px 16px; background:var(--color-background-secondary,rgba(255,255,255,0.05)); border-radius:8px; border:0.5px solid var(--border)">
+    <label style="font-size:14px; color:var(--text2); white-space:nowrap">📅 批次日期</label>
+    <input type="date" id="uploadBatchDate" style="flex:1; font-size:14px; padding:6px 10px; border-radius:6px; border:1px solid var(--border); background:var(--card); color:var(--text)" />
+    <span style="font-size:12px; color:var(--text2)">此日期用於歸檔，不影響唯一性判斷</span>
+  </div>
+
   <div class="upload-zone" onclick="document.getElementById('fileInput').click()">
     <div class="upload-icon">📊</div>
     <div class="upload-title">上傳安辰 Excel 刷單表</div>
@@ -1021,6 +1027,7 @@ let scanPhase = 'material';
 // 頁面載入：自動從Supabase載入最新批次資料
 document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('currentBatch').textContent = today;
+  document.getElementById('uploadBatchDate').value = today;  // 上傳日期預設今天
   try {
     const dates = await loadBatchDates();
     if(dates.length > 0) {
@@ -1116,36 +1123,23 @@ async function toggleCamera() {
     cameraView = await Dynamsoft.DCE.CameraView.createInstance(document.getElementById('camera-container'));
     cameraEnhancer = await Dynamsoft.DCE.CameraEnhancer.createInstance(cameraView);
 
-    try { await cameraEnhancer.setResolution({ width: 1920, height: 1080 }); } catch(e) {}
-
-    // 鎖定後置主鏡頭（Android + iOS 雙重策略）
+    // 先強制設定後置鏡頭再 open，iOS/Android 都有效
+    // 不做 getAllCameras 選擇邏輯，直接用 facingMode 讓系統選
     try {
-      // 策略一：先嘗試 Dynamsoft 的 selectCamera API（Android 效果好）
-      const cameras = await cameraEnhancer.getAllCameras();
-      console.log('可用鏡頭:', cameras.map(c => c.label || c.deviceId));
-      const backCams = cameras.filter(c => {
-        const label = (c.label || '').toLowerCase();
-        return label.includes('back') || label.includes('environment') || label.includes('rear');
+      await cameraEnhancer.updateVideoSettings({
+        video: {
+          facingMode: { exact: 'environment' },
+          width: { ideal: 1920 },
+          height: { ideal: 1080 }
+        }
       });
-      const mainBack = backCams.find(c => (c.label||'').includes('camera 0'))
-        || backCams.find(c => (c.label||'').match(/0[,\s]/))
-        || backCams[0];
-      if(mainBack) {
-        await cameraEnhancer.selectCamera(mainBack);
-      } else {
-        // 策略二：iOS 上 label 可能為空，改用 videoConstraints 的 facingMode
-        // Dynamsoft 支援透過 ifAlreadyExists 傳入 facingMode
-        await cameraEnhancer.selectCamera({ facingMode: { exact: 'environment' } });
-      }
     } catch(e) {
-      // 最後手段：直接設定 videoConstraints
+      // exact 不支援時退回 ideal（避免部分 iOS 版本報錯）
       try {
         await cameraEnhancer.updateVideoSettings({
-          video: { facingMode: { exact: 'environment' } }
+          video: { facingMode: { ideal: 'environment' } }
         });
-      } catch(e2) {
-        console.log('鏡頭選擇錯誤:', e2);
-      }
+      } catch(e2) { console.log('facingMode error:', e2); }
     }
 
     await cameraEnhancer.open();
@@ -1610,7 +1604,7 @@ function parseAnChenExcel(wb) {
     const ws = wb.Sheets[sheetName];
     const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null, raw: false });
 
-    let batchDate = currentBatch;
+    let batchDate = document.getElementById('uploadBatchDate')?.value || today;
 
     // 找標題列：每一格內容必須是短欄位名稱（不超過15字），且包含「料號」「訂單」「主號」其中至少兩個
     let headerRow = -1;
@@ -1669,16 +1663,34 @@ function parseAnChenExcel(wb) {
     const nextStr = nextRow.map(c => String(c||'')).join('');
     if(nextStr.length > 50 && !nextStr.match(/^[0-9]/)) dataStart++;
 
+    let lastMawb = '';
+    let lastHawb = '';
+    let lastSupplier = '';
+    let lastDest = '';
+
     for(let i = dataStart; i < rows.length; i++) {
       const row = rows[i]||[];
       if(row.every(c => c===null||c===undefined||String(c).trim()==='')) continue;
 
       const get = col => col>=0 ? String(row[col]||'').trim() : '';
 
-      const mawb     = get(colMawb);
-      const hawb     = get(colHawb);
-      const supplier = get(colSupplier);
-      const dest     = get(colDest);
+      // 小號空白時繼承上一列（同一分號多筆料號的格式）
+      const mawbRaw     = get(colMawb);
+      const hawbRaw     = get(colHawb);
+      const supplierRaw = get(colSupplier);
+      const destRaw     = get(colDest);
+
+      const mawb     = mawbRaw     || lastMawb;
+      const hawb     = hawbRaw     || lastHawb;
+      const supplier = supplierRaw || lastSupplier;
+      const dest     = destRaw     || lastDest;
+
+      // 有新值就更新記憶
+      if(mawbRaw)     lastMawb = mawbRaw;
+      if(hawbRaw)     lastHawb = hawbRaw;
+      if(supplierRaw) lastSupplier = supplierRaw;
+      if(destRaw)     lastDest = destRaw;
+
       let   material = get(colMaterial);
       let   po1      = get(colPO1);
       const po2      = get(colPO2);
@@ -1747,16 +1759,58 @@ async function saveData() {
   const data = window._previewData;
   if(!data) return;
 
-  // 檢查重複小號警示
-  const hawbCount = {};
-  data.forEach(r => { hawbCount[r.hawb] = (hawbCount[r.hawb]||0) + 1; });
-  const dupHawbs = Object.entries(hawbCount).filter(([h,c]) => c > 1).map(([h]) => h);
+  // 取得批次日期（從日期選擇器讀，不從資料推斷）
+  const batchDate = document.getElementById('uploadBatchDate').value || today;
+
+  // ── 第一關：Excel 內部自我檢查 ──
+  // 同一個小號不能對應到不同主號
+  const hawbMawbMap = {};
+  data.forEach(r => {
+    if(!hawbMawbMap[r.hawb]) hawbMawbMap[r.hawb] = new Set();
+    hawbMawbMap[r.hawb].add(r.mawb);
+  });
+  const dupHawbs = Object.entries(hawbMawbMap)
+    .filter(([h, mawbs]) => mawbs.size > 1)
+    .map(([h, mawbs]) => `小號 ${h} 對應到不同主號：${[...mawbs].join(' / ')}`);
+
+  // 同一個主號在這份 Excel 裡不應該對應到不同小號群（只是提醒，不阻擋）
+  // 實際上一主號多小號是合法的，這裡不做主號重複警示
+
   if(dupHawbs.length > 0) {
-    const ok = confirm('⚠️ 發現重複小號：\n' + dupHawbs.join(', ') + '\n\n這可能是安辰資料有誤，確定要繼續存入嗎？');
+    const ok = confirm('⚠️ 資料異常，可能是 KEY 錯了：\n\n' + dupHawbs.join('\n') + '\n\n建議回 Excel 修正後再上傳。確定要強制存入嗎？');
     if(!ok) return;
   }
 
-  const batchDate = data[0]?._batchDate || currentBatch;
+  // ── 第二關：跟資料庫比對唯一性 ──
+  // 檢查這份 Excel 的小號有沒有已存在資料庫（不分日期，全域唯一）
+  showToast('比對資料庫中...', '');
+  const hawbsToCheck = [...new Set(data.map(r => r.hawb).filter(Boolean))];
+  try {
+    const { data: existingRows } = await sb
+      .from('sorting_data')
+      .select('hawb, mawb, batch_date')
+      .in('hawb', hawbsToCheck);
+
+    if(existingRows && existingRows.length > 0) {
+      // 找出資料庫裡已有的小號，且主號不同的（真正的衝突）
+      const conflicts = [];
+      const sameHawbDiffMawb = [];
+      existingRows.forEach(ex => {
+        const incoming = data.find(r => r.hawb === ex.hawb);
+        if(!incoming) return;
+        if(incoming.mawb !== ex.mawb) {
+          sameHawbDiffMawb.push(`小號 ${ex.hawb}：資料庫主號「${ex.mawb}」vs 本次「${incoming.mawb}」（${ex.batch_date}）`);
+        }
+      });
+      if(sameHawbDiffMawb.length > 0) {
+        const ok = confirm('⚠️ 以下小號在資料庫中已存在，且主號不同：\n\n' + sameHawbDiffMawb.join('\n') + '\n\n這可能是重複導入或資料錯誤，確定要繼續嗎？');
+        if(!ok) return;
+      }
+    }
+  } catch(e) {
+    console.log('資料庫比對失敗（跳過）:', e);
+  }
+
   if(!scanData[batchDate]) scanData[batchDate] = [];
 
   let added = 0, updated = 0, conflicts = [];
