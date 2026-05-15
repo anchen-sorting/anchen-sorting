@@ -1204,6 +1204,8 @@ async function startRouter() {
       items.forEach(item => {
         const raw = item.text;
         console.log('[掃到]', item.formatString, ':', raw.substring(0, 60));
+        // debug：在畫面顯示原始值，方便確認Dynamsoft掃到什麼
+        showToast('[掃到] ' + raw.substring(0, 35), '');
 
         // 從這個值嘗試解析出料號和PO（可能一個值同時含兩個，如奇景QR）
         const { material, po } = extractMaterialAndPO([raw]);
