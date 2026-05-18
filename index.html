@@ -975,11 +975,10 @@ async function saveRowToDB(row, batchDate) {
     fields.forEach(f => { if(payload[f] && !existing[f]) update[f] = payload[f]; });
     if(row.po2 && !existing.po2) update.po2 = row.po2;
 
-    // 箱數累加邏輯
-    const oldQty = parseInt(existing.qty) || 0;
+    // 箱數以新資料為主（不累加，避免重複導入變兩倍）
     const newQty = parseInt(payload.qty) || 0;
     if(newQty > 0) {
-      update.qty = oldQty + newQty;  // 累加而非覆蓋
+      update.qty = newQty;
     }
 
     if(Object.keys(update).length > 0) {
@@ -1100,6 +1099,7 @@ async function openBatchModal() {
         const rows = await loadBatchFromDB(date);
         scanData[date] = rows;
         showToast(`已載入 ${rows.length} 筆`, 'success');
+        renderProgress('all');  // 重新渲染進度頁
       }
     };
     list.appendChild(div);
