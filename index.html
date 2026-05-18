@@ -1740,7 +1740,30 @@ function parseAnChenOriginal(wb) {
     }
   });
 
-  return results;
+  // ── 跨分頁合併：同一份 Excel 內，五個欄位全部一樣的筆合併箱數 ──
+  // 判斷鍵：小號 + 料號 + 訂單號 + 廠商 + 廠區
+  const mergeMap = new Map();
+  results.forEach(r => {
+    const key = `${r.hawb}||${r.material}||${r.po1}||${r.supplier}||${r.dest}`;
+    if(mergeMap.has(key)) {
+      // 已存在：箱數加總
+      const existing = mergeMap.get(key);
+      const oldQty = parseInt(existing.qty) || 0;
+      const newQty = parseInt(r.qty) || 0;
+      existing.qty = oldQty + newQty || null;
+    } else {
+      mergeMap.set(key, { ...r });
+    }
+  });
+
+  const merged = Array.from(mergeMap.values());
+  const mergedCount = results.length - merged.length;
+  if(mergedCount > 0) {
+    console.log(`[跨分頁合併] 合併了 ${mergedCount} 筆重複資料`);
+    showToast(`偵測到 ${mergedCount} 筆跨分頁重複，已自動合併箱數`, 'success');
+  }
+
+  return merged;
 }
 
 function parseAnChenExcel(wb) {
