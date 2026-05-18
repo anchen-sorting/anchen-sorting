@@ -1600,13 +1600,147 @@ function handleFileUpload(event) {
     try {
       const data = new Uint8Array(e.target.result);
       const wb = XLSX.read(data, { type: 'array' });
-      const parsed = parseAnChenExcel(wb);
-      renderPreview(parsed);
+      // 自動偵測格式：看第一個分頁的前幾列，判斷是安辰原始格式還是我們的匯入範本
+      const firstSheet = wb.Sheets[wb.SheetNames[0]];
+      const firstRows = XLSX.utils.sheet_to_json(firstSheet, { header: 1, defval: null, raw: false });
+      const isAnChenOriginal = detectAnChenOriginal(firstRows);
+      console.log('格式偵測：', isAnChenOriginal ? '安辰原始格式' : '匯入範本格式');
+      if(isAnChenOriginal) {
+        showToast('偵測到安辰原始格式，自動轉換中...', '');
+        const parsed = parseAnChenOriginal(wb);
+        renderPreview(parsed);
+      } else {
+        const parsed = parseAnChenExcel(wb);
+        renderPreview(parsed);
+      }
     } catch(err) {
       showToast('解析失敗：' + err.message, 'error');
     }
   };
   reader.readAsArrayBuffer(file);
+}
+
+// 偵測是否為安辰原始格式
+// 特徵：前5列內有「主單號 MAWB」和「出貨廠商 SHIPPER」
+function detectAnChenOriginal(rows) {
+  const top = rows.slice(0, 8).map(r => (r||[]).map(c => String(c||'')).join(' '));
+  const hasMAWB = top.some(r => r.includes('主單號') || r.includes('MAWB'));
+  const hasSHIPPER = top.some(r => r.includes('出貨廠商') || r.includes('SHIPPER'));
+  return hasMAWB && hasSHIPPER;
+}
+
+// 解析安辰原始格式（多分頁，每頁有主單號、出貨廠商、小號、料號、訂單號）
+function parseAnChenOriginal(wb) {
+  const results = [];
+  const batchDate = document.getElementById('uploadBatchDate')?.value || today;
+
+  const isValidMaterial = s => {
+    if(!s) return false;
+    return /^(47-\d{5,}|44\d{8}|4[0-9]{9}|INV#?\s*\d+|SB-)/.test(s);
+  };
+
+  wb.SheetNames.forEach(sheetName => {
+    const ws = wb.Sheets[sheetName];
+    const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null, raw: false });
+
+    // 抓主號（找含「主單號 MAWB」的列，取第3欄）
+    let mawb = '';
+    for(let i = 0; i < Math.min(6, rows.length); i++) {
+      const row = rows[i] || [];
+      const joined = row.map(c => String(c||'')).join('');
+      if(joined.includes('主單號') || joined.includes('MAWB')) {
+        // 找非空的值欄位
+        for(let j = 1; j < row.length; j++) {
+          const v = String(row[j]||'').trim();
+          if(v && !v.includes('主單號') && !v.includes('MAWB') && v.length > 3) {
+            mawb = v;
+            break;
+          }
+        }
+        break;
+      }
+    }
+
+    // 找資料起始列（出貨廠商 SHIPPER 標題列後第2列）
+    let dataStart = -1;
+    for(let i = 0; i < rows.length; i++) {
+      const joined = (rows[i]||[]).map(c => String(c||'')).join('');
+      if(joined.includes('出貨廠商') || joined.includes('SHIPPER')) {
+        dataStart = i + 2; // 跳過標題列和PKG/GW列
+        break;
+      }
+    }
+    if(dataStart < 0) return;
+
+    let lastSupplier = '', lastDest = '', lastHawb = '';
+
+    for(let i = dataStart; i < rows.length; i++) {
+      const row = rows[i] || [];
+      const allEmpty = row.every(c => !c || String(c).trim() === '' || String(c).trim() === ' ');
+      if(allEmpty) continue;
+
+      const get = idx => {
+        if(idx < row.length && row[idx]) {
+          const v = String(row[idx]).trim();
+          return v === ' ' ? '' : v;
+        }
+        return '';
+      };
+
+      const rawSupplier = get(0);
+      const rawDest     = get(1);
+      const rawHawb     = get(2);
+
+      const supplier = rawSupplier || lastSupplier;
+      const dest     = rawDest     || lastDest;
+      const hawb     = rawHawb     || lastHawb;
+
+      if(rawSupplier) lastSupplier = supplier;
+      if(rawDest)     lastDest     = dest;
+      if(rawHawb)     lastHawb     = hawb;
+
+      const materialRaw = get(6);
+      const poRaw       = get(7);
+
+      if(!materialRaw && !poRaw) continue;
+
+      // 料號處理：去掉 *N 提取箱數
+      let qty = null;
+      let material = materialRaw;
+      const qtyMatch = materialRaw.match(/\*(\d+)/);
+      if(qtyMatch) {
+        qty = parseInt(qtyMatch[1]);
+        material = materialRaw.replace(/\s*\*\d+/, '').trim();
+      }
+
+      // 只保留有效料號格式，其他跳過
+      if(!isValidMaterial(material)) continue;
+
+      // 訂單號：主單號 + 括號內的副單號
+      let po1 = '', po2 = '';
+      if(poRaw) {
+        const poClean = poRaw.replace(/\n/g, ' ');
+        const bracketMatch = poClean.match(/\(([^)]+)\)/);
+        if(bracketMatch) {
+          po2 = bracketMatch[1].trim();
+          po1 = poClean.replace(/\s*\([^)]*\)/, '').trim();
+        } else {
+          po1 = poClean.trim();
+        }
+        // 去掉後綴 -XXXXX（9100050977-00020 → 9100050977）
+        po1 = po1.replace(/^(\d{8,})-\d+$/, '$1').trim();
+      }
+
+      results.push({
+        mawb, hawb, supplier, dest, material,
+        po1, po2, qty,
+        _batchDate: batchDate,
+        _warn: !material || !po1 || !hawb || !mawb
+      });
+    }
+  });
+
+  return results;
 }
 
 function parseAnChenExcel(wb) {
