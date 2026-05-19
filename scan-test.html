@@ -223,55 +223,39 @@ async function startBD() {
 }
 
 // ── ZXing ──
-function startZX() {
-  const video = document.getElementById('video');
-  const hints = new Map();
-  hints.set(ZXing.DecodeHintType.TRY_HARDER, true);
+async function startZX() {
+  const codeReader = new ZXing.BrowserMultiFormatReader();
+  zxReader = codeReader;
 
-  const reader = new ZXing.BrowserMultiFormatReader(hints, 200);
-  zxReader = reader;
-  scanStart = performance.now();
-  reader.continuousDecodeFromInputVideoDevice(undefined, 'video').then(result => {
-    // handled in callback
-  }).catch(() => {});
-
-  // ZXing callback
-  reader.timeBetweenDecodingAttempts = 200;
-  const origDecode = reader.decodeFromVideoDevice.bind(reader);
-
-  video.addEventListener('play', () => {
-    const tick = () => {
-      if(!stream) return;
-      const canvas = document.createElement('canvas');
-      canvas.width = video.videoWidth || 640;
-      canvas.height = video.videoHeight || 480;
-      const ctx = canvas.getContext('2d');
-      ctx.drawImage(video, 0, 0);
-      scanStart = performance.now();
-      try {
-        const lum = new ZXing.HTMLCanvasElementLuminanceSource(canvas);
-        const bin = new ZXing.HybridBinarizer(lum);
-        const bitmap = new ZXing.BinaryBitmap(bin);
-        const result = new ZXing.MultiFormatReader().decode(bitmap);
+  try {
+    await codeReader.decodeFromVideoDevice(null, 'video', (result, err) => {
+      if(result) {
         const elapsed = Math.round(performance.now() - scanStart);
+        scanStart = performance.now();
         logResult(result.getBarcodeFormat().toString(), result.getText(), elapsed);
-      } catch(e) {
+      } else if(err && !(err instanceof ZXing.NotFoundException)) {
+        console.log('ZXing error:', err);
+      } else {
+        // NotFoundException = 這幀沒掃到，正常
         stats.fail++;
         updateStats();
+        scanStart = performance.now();
       }
-      setTimeout(tick, 200);
-    };
-    setTimeout(tick, 500);
-  });
+    });
+  } catch(e) {
+    showToast('ZXing 啟動失敗：' + e.message);
+  }
 }
 
 // ── 停止掃描 ──
 function stopScan() {
   if(bdInterval) { clearInterval(bdInterval); bdInterval = null; }
-  if(zxReader) { try { zxReader.reset(); } catch(e) {} zxReader = null; }
+  if(zxReader) { try { zxReader.reset(); zxReader.stopContinuousDecode(); } catch(e) {} zxReader = null; }
   if(stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
+  document.getElementById('video').srcObject = null;
   document.getElementById('scanCard').style.display = 'none';
   activeModule = '';
+  scanStart = 0;
 }
 
 // ── 記錄結果 ──
