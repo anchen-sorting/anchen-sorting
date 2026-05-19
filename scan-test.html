@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>掃描模組測試</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/zxing-js/0.20.0/index.min.js"></script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#0D1117;--card:#161B22;--border:#30363D;
+  --text:#E6EDF3;--text2:#8B949E;
+  --cyan:#00D4FF;--green:#3FB950;--orange:#F0883E;--red:#F85149;
+}
+body{background:var(--bg);color:var(--text);font-family:'SF Pro Display',-apple-system,sans-serif;min-height:100vh;padding:16px}
+h1{font-size:18px;font-weight:600;margin-bottom:4px;color:var(--cyan)}
+.sub{font-size:12px;color:var(--text2);margin-bottom:20px}
+.card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:16px;margin-bottom:12px}
+.card-title{font-size:13px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:12px}
+.badge{display:inline-block;font-size:11px;padding:2px 8px;border-radius:20px;font-weight:500}
+.badge-green{background:rgba(63,185,80,.15);color:var(--green)}
+.badge-orange{background:rgba(240,136,62,.15);color:var(--orange)}
+.badge-red{background:rgba(248,81,73,.15);color:var(--red)}
+.badge-cyan{background:rgba(0,212,255,.15);color:var(--cyan)}
+.btn{width:100%;padding:14px;border:none;border-radius:10px;font-size:15px;font-weight:600;cursor:pointer;transition:.2s}
+.btn-primary{background:var(--cyan);color:#0D1117}
+.btn-secondary{background:var(--border);color:var(--text)}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+#videoWrap{position:relative;border-radius:10px;overflow:hidden;background:#000;aspect-ratio:4/3}
+video{width:100%;height:100%;object-fit:cover;display:block}
+.scan-line{position:absolute;left:10%;right:10%;height:2px;background:linear-gradient(90deg,transparent,var(--cyan),transparent);animation:scan 1.5s ease-in-out infinite;pointer-events:none}
+@keyframes scan{0%{top:20%}50%{top:75%}100%{top:20%}}
+.hint{position:absolute;bottom:0;left:0;right:0;background:rgba(0,0,0,.7);padding:8px;font-size:12px;color:var(--text2);text-align:center}
+.result-box{background:rgba(63,185,80,.08);border:1px solid rgba(63,185,80,.3);border-radius:10px;padding:14px;margin-top:12px}
+.result-label{font-size:11px;color:var(--text2);margin-bottom:4px}
+.result-val{font-size:14px;font-weight:600;font-family:monospace;word-break:break-all}
+.log-box{background:#000;border-radius:8px;padding:12px;max-height:180px;overflow-y:auto;font-size:11px;font-family:monospace}
+.log-item{padding:3px 0;border-bottom:1px solid rgba(255,255,255,.05)}
+.log-item:last-child{border:none}
+.log-time{color:var(--text2)}
+.log-fmt{color:var(--orange)}
+.log-val{color:var(--green)}
+.stat-row{display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border);font-size:13px}
+.stat-row:last-child{border:none}
+.stat-num{font-weight:700;font-size:16px}
+.module-row{display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border);font-size:13px}
+.module-row:last-child{border:none}
+#toast{position:fixed;top:16px;left:16px;right:16px;background:var(--card);border:1px solid var(--border);border-radius:10px;padding:10px 14px;font-size:13px;transform:translateY(-80px);transition:.3s;z-index:999;text-align:center}
+#toast.show{transform:translateY(0)}
+</style>
+</head>
+<body>
+
+<h1>📡 掃描模組測試</h1>
+<p class="sub">測試免費掃描方案，對照 Dynamsoft 效果</p>
+
+<!-- 裝置偵測 -->
+<div class="card">
+  <div class="card-title">裝置資訊</div>
+  <div class="stat-row"><span>作業系統</span><span id="osInfo" class="stat-num">偵測中...</span></div>
+  <div class="stat-row"><span>BarcodeDetector</span><span id="bdSupport">偵測中...</span></div>
+  <div class="stat-row"><span>ZXing</span><span id="zxingSupport">偵測中...</span></div>
+  <div class="stat-row"><span>建議模組</span><span id="recommended" class="stat-num" style="color:var(--cyan)">偵測中...</span></div>
+</div>
+
+<!-- 模組選擇 -->
+<div class="card">
+  <div class="card-title">選擇測試模組</div>
+  <div class="module-row">
+    <div>
+      <div style="font-weight:600">BarcodeDetector</div>
+      <div style="font-size:11px;color:var(--text2)">Chrome 內建 · 免費 · Android 最快</div>
+    </div>
+    <span id="bd-badge" class="badge badge-orange">載入中</span>
+  </div>
+  <div class="module-row">
+    <div>
+      <div style="font-weight:600">ZXing-js</div>
+      <div style="font-size:11px;color:var(--text2)">開源免費 · Android + iOS 通用</div>
+    </div>
+    <span class="badge badge-green">可用</span>
+  </div>
+  <div style="margin-top:12px;display:flex;gap:8px">
+    <button class="btn btn-primary" id="btnBD" onclick="startScan('BD')" style="flex:1" disabled>BarcodeDetector</button>
+    <button class="btn btn-secondary" id="btnZX" onclick="startScan('ZX')" style="flex:1">ZXing</button>
+  </div>
+</div>
+
+<!-- 掃描區 -->
+<div class="card" id="scanCard" style="display:none">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+    <div class="card-title" style="margin:0">掃描中</div>
+    <span id="activeModule" class="badge badge-cyan">-</span>
+  </div>
+  <div id="videoWrap">
+    <video id="video" autoplay playsinline muted></video>
+    <div class="scan-line"></div>
+    <div class="hint">對準條碼或 QR Code，自動辨識</div>
+  </div>
+  <button class="btn btn-secondary" onclick="stopScan()" style="margin-top:12px">停止掃描</button>
+</div>
+
+<!-- 最新結果 -->
+<div class="card" id="resultCard" style="display:none">
+  <div class="card-title">最新掃描結果</div>
+  <div class="result-box">
+    <div class="result-label">格式</div>
+    <div class="result-val" id="resultFmt">-</div>
+    <div class="result-label" style="margin-top:8px">內容</div>
+    <div class="result-val" id="resultVal">-</div>
+    <div class="result-label" style="margin-top:8px">耗時</div>
+    <div class="result-val" id="resultTime">-</div>
+  </div>
+</div>
+
+<!-- 統計 -->
+<div class="card">
+  <div class="card-title">掃描統計</div>
+  <div class="stat-row"><span>成功次數</span><span class="stat-num" id="statSuccess" style="color:var(--green)">0</span></div>
+  <div class="stat-row"><span>失敗次數</span><span class="stat-num" id="statFail" style="color:var(--red)">0</span></div>
+  <div class="stat-row"><span>平均耗時</span><span class="stat-num" id="statAvg">-</span></div>
+  <div class="stat-row"><span>最快耗時</span><span class="stat-num" id="statMin" style="color:var(--cyan)">-</span></div>
+  <button class="btn btn-secondary" onclick="clearStats()" style="margin-top:12px;font-size:13px;padding:10px">清除統計</button>
+</div>
+
+<!-- 掃描記錄 -->
+<div class="card">
+  <div class="card-title">掃描記錄</div>
+  <div class="log-box" id="logBox">
+    <div style="color:var(--text2);text-align:center;padding:20px 0">尚無記錄</div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+// ── 統計 ──
+let stats = { success: 0, fail: 0, times: [] };
+let scanStart = 0;
+let activeModule = '';
+let stream = null;
+let bdInterval = null;
+let zxReader = null;
+
+// ── 偵測裝置 ──
+function detectDevice() {
+  const ua = navigator.userAgent;
+  const isIOS = /iPhone|iPad|iPod/.test(ua);
+  const isAndroid = /Android/.test(ua);
+  document.getElementById('osInfo').textContent = isIOS ? 'iOS' : isAndroid ? 'Android' : 'Desktop';
+
+  // ZXing 一定可用
+  document.getElementById('zxingSupport').innerHTML = '<span class="badge badge-green">支援</span>';
+
+  // BarcodeDetector
+  if('BarcodeDetector' in window) {
+    BarcodeDetector.getSupportedFormats().then(fmts => {
+      document.getElementById('bdSupport').innerHTML = `<span class="badge badge-green">支援 (${fmts.length} 格式)</span>`;
+      document.getElementById('bd-badge').textContent = '可用';
+      document.getElementById('bd-badge').className = 'badge badge-green';
+      document.getElementById('btnBD').disabled = false;
+      document.getElementById('recommended').textContent = isIOS ? 'ZXing' : 'BarcodeDetector';
+    });
+  } else {
+    document.getElementById('bdSupport').innerHTML = '<span class="badge badge-red">不支援</span>';
+    document.getElementById('bd-badge').textContent = '不支援';
+    document.getElementById('bd-badge').className = 'badge badge-red';
+    document.getElementById('recommended').textContent = 'ZXing';
+    document.getElementById('recommended').style.color = 'var(--orange)';
+  }
+}
+
+// ── 開始掃描 ──
+async function startScan(module) {
+  activeModule = module;
+  document.getElementById('activeModule').textContent = module === 'BD' ? 'BarcodeDetector' : 'ZXing';
+  document.getElementById('scanCard').style.display = 'block';
+  document.getElementById('scanCard').scrollIntoView({ behavior: 'smooth' });
+
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: {
+        facingMode: { ideal: 'environment' },
+        width: { ideal: 1920 }, height: { ideal: 1080 }
+      }
+    });
+    document.getElementById('video').srcObject = stream;
+
+    if(module === 'BD') startBD();
+    else startZX();
+
+  } catch(e) {
+    showToast('無法開啟鏡頭：' + e.message);
+  }
+}
+
+// ── BarcodeDetector ──
+async function startBD() {
+  const detector = new BarcodeDetector({
+    formats: ['qr_code', 'code_128', 'code_39', 'ean_13', 'data_matrix', 'itf', 'codabar']
+  });
+  const video = document.getElementById('video');
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
+
+  bdInterval = setInterval(async () => {
+    if(video.readyState < 2) return;
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    ctx.drawImage(video, 0, 0);
+    scanStart = performance.now();
+    try {
+      const codes = await detector.detect(canvas);
+      if(codes.length > 0) {
+        const elapsed = Math.round(performance.now() - scanStart);
+        codes.forEach(c => logResult(c.format, c.rawValue, elapsed));
+      } else {
+        stats.fail++;
+        updateStats();
+      }
+    } catch(e) {}
+  }, 200);
+}
+
+// ── ZXing ──
+function startZX() {
+  const video = document.getElementById('video');
+  const hints = new Map();
+  hints.set(ZXing.DecodeHintType.TRY_HARDER, true);
+
+  const reader = new ZXing.BrowserMultiFormatReader(hints, 200);
+  zxReader = reader;
+  scanStart = performance.now();
+  reader.continuousDecodeFromInputVideoDevice(undefined, 'video').then(result => {
+    // handled in callback
+  }).catch(() => {});
+
+  // ZXing callback
+  reader.timeBetweenDecodingAttempts = 200;
+  const origDecode = reader.decodeFromVideoDevice.bind(reader);
+
+  video.addEventListener('play', () => {
+    const tick = () => {
+      if(!stream) return;
+      const canvas = document.createElement('canvas');
+      canvas.width = video.videoWidth || 640;
+      canvas.height = video.videoHeight || 480;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(video, 0, 0);
+      scanStart = performance.now();
+      try {
+        const lum = new ZXing.HTMLCanvasElementLuminanceSource(canvas);
+        const bin = new ZXing.HybridBinarizer(lum);
+        const bitmap = new ZXing.BinaryBitmap(bin);
+        const result = new ZXing.MultiFormatReader().decode(bitmap);
+        const elapsed = Math.round(performance.now() - scanStart);
+        logResult(result.getBarcodeFormat().toString(), result.getText(), elapsed);
+      } catch(e) {
+        stats.fail++;
+        updateStats();
+      }
+      setTimeout(tick, 200);
+    };
+    setTimeout(tick, 500);
+  });
+}
+
+// ── 停止掃描 ──
+function stopScan() {
+  if(bdInterval) { clearInterval(bdInterval); bdInterval = null; }
+  if(zxReader) { try { zxReader.reset(); } catch(e) {} zxReader = null; }
+  if(stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
+  document.getElementById('scanCard').style.display = 'none';
+  activeModule = '';
+}
+
+// ── 記錄結果 ──
+function logResult(format, value, elapsed) {
+  stats.success++;
+  stats.times.push(elapsed);
+  updateStats();
+
+  // 結果卡片
+  document.getElementById('resultCard').style.display = 'block';
+  document.getElementById('resultFmt').textContent = format;
+  document.getElementById('resultVal').textContent = value;
+  document.getElementById('resultTime').textContent = elapsed + ' ms';
+
+  // 記錄
+  const logBox = document.getElementById('logBox');
+  if(logBox.querySelector('div[style]')) logBox.innerHTML = '';
+  const now = new Date().toLocaleTimeString('zh-TW');
+  const div = document.createElement('div');
+  div.className = 'log-item';
+  div.innerHTML = `<span class="log-time">${now}</span> <span class="log-fmt">[${format}]</span> <span class="log-val">${value.substring(0,50)}</span> <span style="color:var(--text2)">(${elapsed}ms)</span>`;
+  logBox.insertBefore(div, logBox.firstChild);
+
+  // 只保留20筆
+  while(logBox.children.length > 20) logBox.removeChild(logBox.lastChild);
+}
+
+function updateStats() {
+  document.getElementById('statSuccess').textContent = stats.success;
+  document.getElementById('statFail').textContent = stats.fail;
+  if(stats.times.length > 0) {
+    const avg = Math.round(stats.times.reduce((a,b) => a+b, 0) / stats.times.length);
+    const min = Math.min(...stats.times);
+    document.getElementById('statAvg').textContent = avg + ' ms';
+    document.getElementById('statMin').textContent = min + ' ms';
+  }
+}
+
+function clearStats() {
+  stats = { success: 0, fail: 0, times: [] };
+  updateStats();
+  document.getElementById('logBox').innerHTML = '<div style="color:var(--text2);text-align:center;padding:20px 0">尚無記錄</div>';
+  document.getElementById('resultCard').style.display = 'none';
+}
+
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 3000);
+}
+
+detectDevice();
+</script>
+</body>
+</html>
