@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>安辰分貨系統</title>
+<title>台北中速刷單系統</title>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=Noto+Sans+TC:wght@400;500;700;900&display=swap');
 
@@ -659,17 +659,40 @@
   #camera-container { background: #000; overflow: hidden; }
   .dce-video-container { background: #000; }
   .dce-video-container video { width: 100% !important; height: 100% !important; object-fit: cover !important; }
+
+  /* 客戶選擇器 */
+  .client-tag {
+    background: var(--surface2);
+    border: 1px solid var(--accent);
+    border-radius: 6px;
+    padding: 4px 10px;
+    font-size: 11px;
+    font-family: var(--mono);
+    color: var(--accent);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    white-space: nowrap;
+  }
+  .client-tag:active { background: rgba(0,212,255,0.15); }
+  .header-right { display: flex; gap: 8px; align-items: center; }
 </style>
 </head>
 <body>
 
 <div class="header">
   <div>
-    <div class="header-title">安辰分貨系統</div>
-    <div class="header-sub">ANCHEN SORTING v1.0</div>
+    <div class="header-title" id="headerTitle">台北中速刷單系統</div>
+    <div class="header-sub">TAIPEI SORTING SYSTEM v1.0</div>
   </div>
-  <div class="batch-tag" onclick="openBatchModal()">
-    📦 <span id="currentBatch">2026-05-11</span>
+  <div class="header-right">
+    <div class="client-tag" onclick="openClientModal()">
+      👤 <span id="currentClientName">安辰</span>
+    </div>
+    <div class="batch-tag" onclick="openBatchModal()">
+      📦 <span id="currentBatch">2026-05-11</span>
+    </div>
   </div>
 </div>
 
@@ -894,6 +917,18 @@
 <!-- TOAST -->
 <div class="toast" id="toast"></div>
 
+<!-- ══════════════════════════════════════
+     CLIENT MODAL
+══════════════════════════════════════ -->
+<div class="modal-overlay" id="clientModal" onclick="if(event.target===this)closeClientModal()">
+  <div class="modal-sheet">
+    <div class="modal-title">選擇客戶</div>
+    <div id="clientList"></div>
+    <div class="divider"></div>
+    <button class="btn btn-secondary" onclick="closeClientModal()">取消</button>
+  </div>
+</div>
+
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdn.jsdelivr.net/npm/dynamsoft-barcode-reader-bundle@11.2.4000/dist/dbr.bundle.js"></script>
@@ -911,12 +946,41 @@ const SUPABASE_URL = 'https://pqgjrfdnyeopqfzntqis.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_XSwK5cq3nvUCPwiLoSWMuA_Xna5GXyr';
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
+// ════════════════════════════════
+// 客戶設定
+// ════════════════════════════════
+// 新增客戶：在 CLIENTS 裡加一組 key，等確定格式後再設定 rules
+const CLIENTS = {
+  'anchen': {
+    name: '安辰',
+    color: '#00d4ff',
+    rules: {
+      // 安辰識別規則說明（實際邏輯在 extractMaterialAndPO 內）
+      // 料號：47-XXXXXXX / 44XXXXXXXX / SB-XXX / INV#XXXXX
+      // 訂單號：91XXXXXXXXXX / 44XXXXXXXX
+      materialPrefixes: ['47-', '44', 'SB-', 'INV'],
+      poPrefixes: ['91', '44']
+    }
+  }
+  // 未來新客戶在這裡補上：
+  // 'clientB': { name: 'XX公司', color: '#ff6b35', rules: { ... } }
+};
+let currentClient = 'anchen'; // 預設安辰
+
+// ════════════════════════════════
 // 從資料庫載入批次資料
 async function loadBatchFromDB(date) {
-  const { data, error } = await sb
+  let query = sb
     .from('sorting_data')
     .select('*')
     .eq('batch_date', date);
+  // 安辰：包含舊資料（client = null）一起查
+  if(currentClient === 'anchen') {
+    query = query.or('client.eq.anchen,client.is.null');
+  } else {
+    query = query.eq('client', currentClient);
+  }
+  const { data, error } = await query;
   if(error) { console.error('載入失敗:', error); return []; }
   return data.map(r => ({
     mawb: r.mawb||'', hawb: r.hawb||'', supplier: r.supplier||'',
@@ -927,10 +991,16 @@ async function loadBatchFromDB(date) {
 
 // 取得所有批次日期
 async function loadBatchDates() {
-  const { data, error } = await sb
+  let query = sb
     .from('sorting_data')
     .select('batch_date')
     .order('batch_date', { ascending: false });
+  if(currentClient === 'anchen') {
+    query = query.or('client.eq.anchen,client.is.null');
+  } else {
+    query = query.eq('client', currentClient);
+  }
+  const { data, error } = await query;
   if(error || !data) return [];
   const dates = [...new Set(data.map(r => r.batch_date))];
   return dates;
@@ -940,6 +1010,7 @@ async function loadBatchDates() {
 async function saveRowToDB(row, batchDate) {
   const payload = {
     batch_date: batchDate,
+    client: currentClient,       // ← 記錄屬於哪個客戶
     mawb: row.mawb||null,
     hawb: row.hawb||null,
     supplier: row.supplier||null,
@@ -951,14 +1022,20 @@ async function saveRowToDB(row, batchDate) {
     updated_at: new Date().toISOString()
   };
 
-  // 用 hawb + material + po1 查是否已存在（全域唯一，不限批次日期）
-  const { data: existing } = await sb
+  // 用 hawb + material + po1 查是否已存在（同客戶內唯一，不限批次日期）
+  let existQuery = sb
     .from('sorting_data')
     .select('id, mawb, hawb, supplier, dest, qty, material, po1, batch_date')
     .eq('material', row.material)
     .eq('po1', row.po1)
-    .eq('hawb', row.hawb)
-    .maybeSingle();
+    .eq('hawb', row.hawb);
+  // 安辰包含舊資料（client = null）
+  if(currentClient === 'anchen') {
+    existQuery = existQuery.or('client.eq.anchen,client.is.null');
+  } else {
+    existQuery = existQuery.eq('client', currentClient);
+  }
+  const { data: existing } = await existQuery.maybeSingle();
 
   if(!existing) {
     const { error } = await sb.from('sorting_data').insert(payload);
@@ -1035,6 +1112,9 @@ let scanPhase = 'material';
 
 // 頁面載入：自動從Supabase載入最新批次資料
 document.addEventListener('DOMContentLoaded', async () => {
+  // 初始化客戶標籤顯示
+  document.getElementById('currentClientName').textContent = CLIENTS[currentClient].name;
+
   document.getElementById('currentBatch').textContent = today;
   document.getElementById('uploadBatchDate').value = today;  // 上傳日期預設今天
   try {
@@ -1107,6 +1187,62 @@ async function openBatchModal() {
 }
 function closeBatchModal() {
   document.getElementById('batchModal').classList.remove('show');
+}
+
+// ════════════════════════════════
+// CLIENT MODAL
+// ════════════════════════════════
+function openClientModal() {
+  const list = document.getElementById('clientList');
+  list.innerHTML = '';
+  Object.entries(CLIENTS).forEach(([key, client]) => {
+    const div = document.createElement('div');
+    div.className = 'batch-option' + (key === currentClient ? ' selected' : '');
+    div.innerHTML = `
+      <div>
+        <div class="batch-date">${client.name}</div>
+        <div class="batch-info" style="color:${client.color}">${key}</div>
+      </div>
+      <div style="font-size:18px; color:var(--success)">${key === currentClient ? '✓' : ''}</div>
+    `;
+    div.onclick = () => switchClient(key);
+    list.appendChild(div);
+  });
+  document.getElementById('clientModal').classList.add('show');
+}
+
+function closeClientModal() {
+  document.getElementById('clientModal').classList.remove('show');
+}
+
+async function switchClient(clientKey) {
+  if(clientKey === currentClient) { closeClientModal(); return; }
+  currentClient = clientKey;
+  const client = CLIENTS[clientKey];
+  // 只更新客戶標籤，系統名稱固定不變
+  document.getElementById('currentClientName').textContent = client.name;
+  closeClientModal();
+  showToast('切換到：' + client.name, 'success');
+  // 重新載入該客戶的批次資料
+  try {
+    const dates = await loadBatchDates();
+    if(dates.length > 0) {
+      const targetDate = dates.includes(today) ? today : dates[0];
+      currentBatch = targetDate;
+      document.getElementById('currentBatch').textContent = targetDate;
+      const rows = await loadBatchFromDB(targetDate);
+      scanData[targetDate] = rows;
+      showToast(`${client.name} ${targetDate} 共 ${rows.length} 筆`, 'success');
+      renderProgress('all');
+    } else {
+      currentBatch = today;
+      document.getElementById('currentBatch').textContent = today;
+      showToast(client.name + ' 尚無資料', '');
+    }
+  } catch(e) {
+    console.error('切換客戶載入失敗:', e);
+    showToast('載入失敗，請重新整理', 'error');
+  }
 }
 
 // ════════════════════════════════
